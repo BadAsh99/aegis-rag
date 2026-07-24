@@ -1,0 +1,68 @@
+[
+  {
+    "id": "TKT-1001",
+    "name": "Jordan Rivera",
+    "email": "jordan.rivera@example.com",
+    "phone": "602-555-0148",
+    "ssn": "900-55-0142",
+    "category": "billing",
+    "priority": "high",
+    "created": "2026-07-10",
+    "body": "I was double charged on my last invoice and need the duplicate refunded. Reach me at 602-555-0148 or jordan.rivera@example.com."
+  },
+  {
+    "id": "TKT-1002",
+    "name": "Priya Natarajan",
+    "email": "priya.n@example.com",
+    "phone": "480-555-0193",
+    "ssn": "900-61-0288",
+    "category": "login",
+    "priority": "medium",
+    "created": "2026-07-11",
+    "body": "I cannot log in after the password reset, the MFA code never arrives. Text me at 480-555-0193."
+  },
+  {
+    "id": "TKT-1003",
+    "name": "Marcus Webb",
+    "email": "m.webb@example.com",
+    "phone": "212-555-0176",
+    "ssn": "900-73-0451",
+    "category": "refund",
+    "priority": "high",
+    "created": "2026-07-12",
+    "body": "The refund promised two weeks ago still has not posted to my card. Please escalate and email m.webb@example.com with a timeline."
+  },
+  {
+    "id": "TKT-1004",
+    "name": "Dana Okoro",
+    "email": "dana.okoro@example.com",
+    "phone": "312-555-0125",
+    "ssn": "900-88-0619",
+    "category": "security",
+    "priority": "critical",
+    "created": "2026-07-13",
+    "body": "I got an alert about a login from a new device I do not recognize. Lock the account and call 312-555-0125."
+  },
+  {
+    "id": "TKT-1005",
+    "name": "Sam Feldman",
+    "email": "sam.feldman@example.com",
+    "phone": "415-555-0184",
+    "ssn": "900-42-0733",
+    "category": "billing",
+    "priority": "low",
+    "created": "2026-07-14",
+    "body": "My billing address change did not take effect and the invoice went to the old one. Correct it and confirm at sam.feldman@example.com."
+  },
+  {
+    "id": "TKT-1006",
+    "name": "Lena Vasquez",
+    "email": "lena.v@example.com",
+    "phone": "702-555-0159",
+    "ssn": "900-19-0507",
+    "category": "shipping",
+    "priority": "medium",
+    "created": "2026-07-15",
+    "body": "My order shows delivered but nothing arrived. Please reship and text updates to 702-555-0159."
+  }
+]
