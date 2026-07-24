@@ -103,6 +103,29 @@ class MockProtector(Protector):
         return set(MOCK_TOKEN_RE.findall(text))
 
 
+class NaiveProtector(Protector):
+    """The 'before' — no protection at all. This is the baseline the attack
+    defeats: identical pipeline, this protector swapped in, and raw PII flows
+    into the store, the prompt, and the attacker's exfil channel. Proving AEGIS
+    is a one-line drop-in is the whole point of using the same pipeline code.
+    """
+
+    def protect(self, value: str, data_element: str = "text") -> str:
+        return value
+
+    def unprotect(self, token: str, *, authorized: bool, data_element: str = "text") -> str:
+        return token
+
+    def protect_freetext(self, text: str) -> str:
+        return text
+
+    def reveal(self, text: str, *, authorized: bool) -> str:
+        return text
+
+    def tokens_in(self, text: str) -> set[str]:
+        return set()
+
+
 class ProtegrityProtector(Protector):
     """Real Protegrity Developer Edition adapter.
 
@@ -163,6 +186,8 @@ def get_protector(kind: str) -> Protector:
     kind = (kind or "mock").lower()
     if kind == "mock":
         return MockProtector()
+    if kind == "naive":
+        return NaiveProtector()
     if kind == "protegrity":
         return ProtegrityProtector()
-    raise ValueError(f"unknown protector {kind!r} (want: mock | protegrity)")
+    raise ValueError(f"unknown protector {kind!r} (want: naive | mock | protegrity)")
