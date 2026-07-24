@@ -1,62 +1,86 @@
-"""The core security assertion, as an automated test.
+"""The security assertions — with an INDEPENDENT oracle.
 
-If any of these fail, the pipeline leaked raw PII somewhere it shouldn't. Run:
-
-    pytest -q          # from the repo root
+The earlier version built its ground-truth PII set from the pipeline's own
+detector, so it was blind to exactly what the detector missed (the certifier's
+paradox). Here the oracle is hardcoded, and one fixture puts real names in prose
+to prove the regex gap instead of hiding it. Run:  pytest -q  (from repo root)
 """
 import json
 import os
 
-from aegis.pii import find_pii
+import pytest
+
 from aegis.pipeline import Aegis
 from aegis.policy import Principal
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data", "sample_records.json")
-
 with open(DATA) as _f:
-    RAW = json.load(_f)
+    SAMPLE = json.load(_f)
+
+# INDEPENDENT oracle — hardcoded, NOT derived from the pipeline's detector.
+STRUCTURED_PII = sorted({
+    r[k] for r in SAMPLE for k in ("name", "email", "phone", "ssn") if r.get(k)
+})
+
+# A record with third-party names buried in free text — the case regex misses.
+NAME_IN_BODY_FIXTURE = [{
+    "id": "TKT-9001", "name": "Robin Vale", "email": "robin.vale@example.com",
+    "phone": "480-555-0130", "ssn": "900-30-0111", "category": "account",
+    "priority": "medium", "created": "2026-07-20",
+    "body": "Please also add my wife Jane Smith and our physician Dr. Alan Poe as authorized contacts.",
+}]
+FREE_TEXT_NAMES = ["Jane Smith", "Alan Poe"]  # independent oracle: names in prose
 
 
-def raw_pii_values():
-    """Every raw sensitive value in the source data (structured + in-body)."""
-    vals = set()
-    for r in RAW:
-        for k in ("name", "email", "phone", "ssn"):
-            if r.get(k):
-                vals.add(r[k])
-        for _label, span in find_pii(r.get("body", "")):
-            vals.add(span)
-    return {v for v in vals if v}
-
-
-def fresh():
+def fresh(records=None):
     a = Aegis()
-    a.ingest(DATA)
+    a.ingest(DATA) if records is None else a.ingest_records(records)
     return a
 
 
-def test_no_raw_pii_in_vector_store():
+def test_structured_pii_never_raw_in_store():
     blob = json.dumps(fresh().store.dump())
-    leaked = sorted(v for v in raw_pii_values() if v in blob)
-    assert not leaked, f"raw PII leaked into the vector store: {leaked}"
+    leaked = [v for v in STRUCTURED_PII if v in blob]
+    assert not leaked, f"structured PII leaked into the vector store: {leaked}"
 
 
-def test_no_raw_pii_in_llm_prompt():
+def test_no_structured_pii_in_llm_prompt():
     res = fresh().answer("billing refund complaint", Principal("anonymous", "none"))
-    leaked = sorted(v for v in raw_pii_values() if v in res["prompt"])
-    assert not leaked, f"raw PII leaked into the LLM prompt: {leaked}"
+    leaked = [v for v in STRUCTURED_PII if v in res["prompt"]]
+    assert not leaked, f"structured PII leaked into the LLM prompt: {leaked}"
 
 
 def test_unauthorized_caller_gets_no_raw_pii():
     res = fresh().answer("billing", Principal("anonymous", "none"))
     assert res["authorized"] is False
-    leaked = sorted(v for v in raw_pii_values() if v in res["final_answer"])
+    leaked = [v for v in STRUCTURED_PII if v in res["final_answer"]]
     assert not leaked, f"unauthorized caller saw raw PII: {leaked}"
 
 
 def test_authorized_caller_can_detokenize():
     res = fresh().answer("billing refund", Principal("support_agent", "authorized_response"))
     assert res["authorized"] is True
-    # detokenization changed the answer (a token was resolved to a raw value)
     assert res["final_answer"] != res["llm_answer"]
+
+
+def test_query_side_tokenization_finds_by_identifier():
+    # Item-2 fix: an identifier query works because the query's PII is tokenized
+    # with the same deterministic protector and matches the store's token exactly.
+    # (Phone is detectable by the mock; names need Protegrity's PERSON NER — same
+    # mechanism, better detector.)
+    hits = fresh().retrieve("who is reachable at 602-555-0148?", k=3)
+    ids = [d.get("id") for d, _ in hits]
+    assert "TKT-1001" in ids, f"identifier query should surface the matching ticket; got {ids}"
+
+
+@pytest.mark.xfail(
+    reason="MockProtector uses regexes, not PERSON NER, so names in free text leak. "
+           "Real Protegrity find_and_protect (PERSON) closes this. The residual risk "
+           "is detector recall — we measure it, we don't hide it.",
+    strict=False,
+)
+def test_no_freetext_names_leak():
+    blob = json.dumps(fresh(NAME_IN_BODY_FIXTURE).store.dump())
+    leaked = [n for n in FREE_TEXT_NAMES if n in blob]
+    assert not leaked, f"free-text names leaked into the store: {leaked}"
