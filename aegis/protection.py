@@ -126,6 +126,36 @@ class NaiveProtector(Protector):
         return set()
 
 
+class MaskProtector(Protector):
+    """Blanket redaction — the naive 'privacy' baseline. Kills leakage BUT
+    destroys referential integrity (every PII value collapses to one [REDACTED]),
+    so you can't tell records apart, can't look up by identifier, and can NEVER
+    get the value back (irreversible). The benchmark exists to show tokenization
+    beats this on the privacy/utility frontier: same privacy, far more utility.
+    """
+
+    MASK = "[REDACTED]"
+
+    def protect(self, value: str, data_element: str = "text") -> str:
+        return self.MASK
+
+    def unprotect(self, token: str, *, authorized: bool, data_element: str = "text") -> str:
+        return token  # masking is one-way; nothing to reverse
+
+    def protect_freetext(self, text: str) -> str:
+        from .pii import PATTERNS
+
+        for _label, pat in PATTERNS:
+            text = pat.sub(self.MASK, text)
+        return text
+
+    def reveal(self, text: str, *, authorized: bool) -> str:
+        return text  # can't un-redact — the value is gone
+
+    def tokens_in(self, text: str) -> set[str]:
+        return set()
+
+
 class ProtegrityProtector(Protector):
     """Real Protegrity Developer Edition adapter.
 
@@ -188,6 +218,8 @@ def get_protector(kind: str) -> Protector:
         return MockProtector()
     if kind == "naive":
         return NaiveProtector()
+    if kind == "mask":
+        return MaskProtector()
     if kind == "protegrity":
         return ProtegrityProtector()
-    raise ValueError(f"unknown protector {kind!r} (want: naive | mock | protegrity)")
+    raise ValueError(f"unknown protector {kind!r} (want: naive | mask | mock | protegrity)")
