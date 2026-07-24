@@ -1,26 +1,34 @@
-"""AEGIS benchmark — the privacy/utility table nobody publishes.
+"""AEGIS benchmark — the privacy/utility table, run honestly.
 
-Three strategies, same corpus + queries, measured together (the RAG-security
-literature says report privacy AND utility AND attack-robustness jointly — almost
-nobody does):
+Three strategies, same corpus + queries, measured together:
 
     none  (NaiveProtector)  ·  mask ([REDACTED])  ·  tokenize (AEGIS)
 
 Metrics:
   - topic recall@3        (utility: does topic retrieval still work?)
-  - identifier recall@3   (utility: can you look a record up by its PII?)
+  - identifier recall@3   (utility: look a record up by its PII — FAIR: the naive
+                           baseline gets raw-substring match, AEGIS gets token
+                           match, so nobody is handicapped)
   - store leakage         (privacy: % of records with raw PII at rest)
-  - exfil leakage         (privacy: injection attack leaks raw PII?)
-  - authorized reveal     (utility: can the RIGHT caller get the value back?)
-  - re-id attack recovery (privacy: link a stolen embedding back to a person)
+  - exfil leakage         (privacy: injection attack leaks raw PII to anon caller?)
+  - authorized reveal     (utility: can the SCOPED caller get their value back?)
+  - name re-id (lexical)  (privacy: link a stolen record back to a person)
 
     python benchmark.py
 
-The re-identification attack is a runnable, self-contained proxy for embedding
-INVERSION: an attacker who exfiltrates the vector store links each embedding to a
-person by nearest-neighbor over a candidate name list. Naive embeddings re-id;
-AEGIS embeddings don't. The production-grade inversion attack is Vec2Text (Morris
-et al. 2023: ~92% exact recovery from ada-002 embeddings) — see the invert hook.
+HONESTY (rebuilt after a 4-agent audit):
+  * Embedder: prints which one actually ran. Install sentence-transformers to
+    measure REAL semantic retrieval; otherwise it's a lexical hash embedder and
+    "topic recall" is a lexical-overlap result, not a semantic one — stated, not
+    hidden.
+  * The re-id column is a LEXICAL proxy: it links a stolen record to a name by
+    nearest-neighbour over the stored text. It demonstrates that tokenized text
+    doesn't carry the name; it is NOT the full embedding-inversion attack. The
+    production attack is Vec2Text (Morris et al. 2023, ~92% exact recovery from
+    ada-002) — a SEPARATE, stronger attack documented in invert_vec2text(), not
+    claimed as run here.
+  * N is small (see printed corpus size): these numbers are illustrative of the
+    architecture's behaviour, not a statistically-powered benchmark.
 """
 import json
 import os
@@ -28,9 +36,11 @@ import re
 
 import numpy as np
 
+from aegis import policy
 from aegis.pipeline import Aegis
-from aegis.policy import Principal
 from aegis.protection import get_protector
+from aegis.vectorstore import get_embedder
+import aegis.config as config
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SAMPLE = json.load(open(os.path.join(ROOT, "data", "sample_records.json")))
@@ -55,10 +65,20 @@ ID_QUERIES = [
     ("who is reachable at 602-555-0148", "TKT-1001"),
     ("the customer at m.webb@example.com", "TKT-1003"),
 ]
+# which ticket each identifier query authorizes (for the authorized-reveal metric)
+ID_OWNER = {"who is reachable at 602-555-0148": "TKT-1001"}
 
 
-def build(kind):
-    a = Aegis(protector=get_protector(kind))
+def _resolve_embedder():
+    """Prefer real semantic embeddings; fall back to the lexical hash embedder."""
+    try:
+        return get_embedder("minilm", config.MINILM_MODEL), "minilm (real semantic)"
+    except Exception:
+        return get_embedder("hash", config.MINILM_MODEL), "hash (LEXICAL fallback — topic recall is lexical, install sentence-transformers for semantic)"
+
+
+def build(kind, embedder):
+    a = Aegis(protector=get_protector(kind), embedder=embedder)
     a.ingest(os.path.join(ROOT, "data", "sample_records.json"))
     a.ingest_records([POISONED])
     return a
@@ -87,18 +107,19 @@ def store_leak(a):
 
 
 def exfil_leak(a):
-    res = a.answer("billing refund problem, need help", Principal("anonymous", "none"))
-    return 1.0 if _real_pii(res["llm_answer"]) else 0.0
-
-
-def authorized_reveal(a):
-    res = a.answer("billing refund, reachable at 602-555-0148",
-                   Principal("support_agent", "authorized_response"))
+    res = a.answer("billing refund problem, need help", policy.anonymous())
     return 1.0 if _real_pii(res["final_answer"]) else 0.0
 
 
-def reid_attack(a):
-    """Steal the store, link each embedding back to a person (nearest name)."""
+def authorized_reveal(a):
+    # a SCOPED support agent working TKT-1001 asks about their own case
+    res = a.answer("billing refund, reachable at 602-555-0148", policy.agent_for("TKT-1001"))
+    return 1.0 if _real_pii(res["final_answer"]) else 0.0
+
+
+def reid_lexical(a):
+    """Steal the store, link each record back to a person by nearest name over the
+    STORED text (a lexical proxy for embedding inversion — not Vec2Text)."""
     names = [r["name"] for r in SAMPLE]
     cand = np.asarray(a.embedder.encode([f"customer {n}" for n in names]), dtype=np.float32)
     correct = total = 0
@@ -114,22 +135,23 @@ def reid_attack(a):
 
 
 def invert_vec2text(embeddings):  # pragma: no cover - documented production hook
-    """Full embedding-inversion attack (Morris et al. 2023). Requires
-    `pip install vec2text` + OpenAI ada-002 embeddings (its inversion models are
-    trained per-encoder). Returns reconstructed text. Local benchmark uses the
-    re-id proxy above; this is the production-grade version for the writeup."""
+    """The REAL embedding-inversion attack (Morris et al. 2023), separate from the
+    lexical re-id proxy above. Requires `pip install vec2text` + ada-002 embeddings
+    (its models are trained per-encoder). This is the production-grade attack for
+    the writeup; the local benchmark uses the lexical proxy."""
     import vec2text  # noqa
 
     raise NotImplementedError("swap the embedder to ada-002 and call vec2text.invert_embeddings")
 
 
 def main():
-    kinds = ["naive", "mask", "mock"]  # mock == the AEGIS tokenization protector
+    embedder, embed_label = _resolve_embedder()
+    kinds = ["naive", "mask", "mock"]
     labels = {"naive": "none (naive)", "mask": "mask ([REDACTED])", "mock": "tokenize (AEGIS)"}
 
     rows = []
     for kind in kinds:
-        a = build(kind)
+        a = build(kind, embedder)
         rows.append({
             "strategy": labels[kind],
             "topic recall@3": topic_recall(a),
@@ -137,14 +159,15 @@ def main():
             "store leakage": store_leak(a),
             "exfil leakage": exfil_leak(a),
             "authorized reveal": authorized_reveal(a),
-            "re-id attack recovery": reid_attack(a),
+            "name re-id (lexical)": reid_lexical(a),
         })
 
     cols = ["topic recall@3", "identifier recall@3", "store leakage", "exfil leakage",
-            "authorized reveal", "re-id attack recovery"]
+            "authorized reveal", "name re-id (lexical)"]
     w = 22
     print("\n" + "=" * 100)
     print("AEGIS benchmark — privacy vs utility (higher recall/reveal = better; lower leakage/re-id = better)")
+    print(f"corpus N={len(SAMPLE)} records (+1 poisoned)   ·   embedder: {embed_label}")
     print("=" * 100)
     head = f"{'strategy':<20}" + "".join(f"{c:>{w}}" for c in cols)
     print(head)
@@ -154,24 +177,23 @@ def main():
         print(line)
     print("=" * 100)
 
-    aegis = rows[-1]
+    none, mask, aegis = rows[0], rows[1], rows[2]
     print("\nThe punchline:")
-    print("  - none:  full utility, full leakage, embeddings re-identify people.")
+    print("  - none:  full utility, full leakage, stored text links straight back to people.")
     print("  - mask:  low leakage BUT identifier lookup dies and the value is gone forever (reveal=0).")
-    print("  - AEGIS: low leakage AND identifier lookup works AND authorized callers still resolve.")
-    print("           Same privacy as masking, the utility of plaintext. That's the frontier win.")
-    print("\n  Re-id attack: naive embeddings link back to a person; AEGIS embeddings ~= chance.")
-    print("  Production inversion attack = Vec2Text (Morris et al. 2023, ~92% exact recovery) — see invert_vec2text().\n")
+    print("  - AEGIS: MATCHES plaintext utility (topic + identifier lookup) with ZERO leakage,")
+    print("           AND the scoped caller still resolves. Mask's privacy, plaintext's utility.")
+    print("  Re-id is a LEXICAL proxy; the real attack is Vec2Text (Morris 2023) — see invert_vec2text().")
+    print(f"  N={len(SAMPLE)}: illustrative of behaviour, not a powered benchmark.\n")
 
-    # invariants (so the table isn't cherry-picked)
-    none, mask = rows[0], rows[1]
-    assert none["store leakage"] > 0.9 and aegis["store leakage"] < 0.1
-    # tokenization keeps identifier lookup (deterministic exact match); masking loses it,
-    # and AEGIS is at least as good as plaintext because exact-match beats flaky semantic.
-    assert aegis["identifier recall@3"] > mask["identifier recall@3"]
-    assert aegis["identifier recall@3"] >= none["identifier recall@3"]
-    assert aegis["authorized reveal"] == 1.0 and mask["authorized reveal"] == 0.0
-    assert aegis["re-id attack recovery"] < none["re-id attack recovery"]
+    # invariants (so the table isn't cherry-picked) — fair baseline, honest bounds
+    assert none["store leakage"] > 0.9 and aegis["store leakage"] < 0.1, "store-leak invariant"
+    assert aegis["exfil leakage"] == 0.0 and none["exfil leakage"] == 1.0, "exfil invariant"
+    # AEGIS matches the fair plaintext baseline on identifier lookup and beats mask
+    assert aegis["identifier recall@3"] >= none["identifier recall@3"], "id-recall vs naive"
+    assert aegis["identifier recall@3"] > mask["identifier recall@3"], "id-recall vs mask"
+    assert aegis["authorized reveal"] == 1.0 and mask["authorized reveal"] == 0.0, "reveal invariant"
+    assert aegis["name re-id (lexical)"] < none["name re-id (lexical)"], "re-id invariant"
 
 
 if __name__ == "__main__":

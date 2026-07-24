@@ -17,12 +17,16 @@ CREDIT_CARD = re.compile(r"\b(?:\d[ -]?){13,16}\b")
 PATTERNS = [("SSN", SSN), ("CREDIT_CARD", CREDIT_CARD), ("EMAIL", EMAIL), ("PHONE", PHONE)]
 
 
-def tokenize_text(text: str, protector) -> str:
-    """Replace every detected PII span in `text` with a protector token."""
+def tokenize_text(text: str, protector, owner: str | None = None) -> str:
+    """Replace every detected PII span in `text` with a protector token.
+
+    `owner` is the record the text came from, stamped onto each token so reveal
+    can be scope-bound (an authorized agent only unlocks its own case's tokens).
+    """
     if not text:
         return text
-    for _label, pat in PATTERNS:
-        text = pat.sub(lambda m: protector.protect(m.group(0)), text)
+    for label, pat in PATTERNS:
+        text = pat.sub(lambda m: protector.protect(m.group(0), data_element=label, owner=owner), text)
     return text
 
 

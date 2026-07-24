@@ -20,12 +20,13 @@ FIELD_ELEMENT = {
 
 
 def protect_record(rec: dict, protector) -> dict:
+    owner = rec.get("id")  # every token from this record is stamped with its owner
     out: dict = {}
     for k, v in rec.items():
         if k in PII_FIELDS and isinstance(v, str):
-            out[k] = protector.protect(v, data_element=FIELD_ELEMENT.get(k, "text"))
+            out[k] = protector.protect(v, data_element=FIELD_ELEMENT.get(k, "text"), owner=owner)
         elif k == "body" and isinstance(v, str):
-            out[k] = protector.protect_freetext(v)
+            out[k] = protector.protect_freetext(v, owner=owner)
         else:
             out[k] = v  # non-PII passthrough (id, category, priority, created...)
     out["text"] = (
