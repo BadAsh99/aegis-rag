@@ -1,107 +1,104 @@
-# AEGIS — a RAG pipeline where sensitive data is never exposed in raw form
+# AEGIS — assume the prompt injection wins
 
-> **2026 Protegrity AI Pipeline Security Hackathon** · track: *Architect AI without exposure* · handle: **BadAsh99**
+> **The injection succeeded. The attacker got tokens, not people.**
+>
+> A RAG pipeline built on the premise that prompt injection *will* succeed — so when an attacker exfiltrates from the vector store or hijacks the LLM, they steal Protegrity tokens, not names / SSNs / PHI. Real values resolve only for an authenticated, authorized caller.
+>
+> 2026 Protegrity AI Pipeline Security Hackathon · track: *Architect AI Without Exposure* · handle: **BadAsh99**
 
-Most "secure AI" stories defend the prompt. AEGIS defends the **data**. Sensitive
-values are tokenized on ingest with **Protegrity Developer Edition**, stay
-protected through embedding, vector storage, retrieval, and LLM inference, and
-are detokenized **only** for a policy-authorized caller, at the very end.
+<!-- MONEY-SHOT GIF GOES HERE (record `python attack_demo.py`, cut to a GIF, drop it above this line).
+     Split-screen, same injection payload: LEFT naive RAG leaks real people; RIGHT AEGIS leaks tokens. -->
 
-**Breach the vector store, or dump the prompt logs, and you get tokens — not people.**
-
+```text
+💉  BREACH 2 — indirect prompt injection (the injection succeeds in BOTH)
+    ATTACKER'S EXFIL CHANNEL:
+      NAIVE  →  phones: ['312-555-0125', '480-555-0193']   emails: ['m.webb@example.com']   ← REAL PEOPLE
+      AEGIS  →  phones: —   emails: —                                                        ← nothing but tokens
 ```
-raw record ──▶ protect() ──▶ embed ──▶ vector store ──▶ retrieve ──▶ LLM prompt ──▶ LLM answer ──▶ unprotect() ──▶ user
-             (Protegrity)                (tokens)                     (tokens)         (tokens)      ▲ policy-gated
-                                                                                                     └ authorized callers only
-```
-
-Everything from ingest through the model handles **only tokens**. There is exactly
-one detokenization point, and it is gated by policy.
 
 ---
 
-## Quickstart (runs offline in ~30 seconds, no API keys)
+## The threat this defends against
+
+- **EchoLeak (CVE-2025-32711)** — the first zero-click data-exfil from M365 Copilot (CVSS 9.3). Injection arrives in retrieved content; the model exfiltrates. Not theory.
+- **OWASP LLM08:2025 — Vector & Embedding Weaknesses** — a *new* 2025 category naming embedding-inversion and cross-tenant leakage. AEGIS maps to it 1:1.
+- **OWASP LLM02 — Sensitive Information Disclosure.**
+
+The credible field has already conceded the input layer: Simon Willison's *lethal trifecta*, Google DeepMind's *CaMeL* ("defeating prompt injection **by design**"). You can't reliably detect intent at the prompt. **So AEGIS doesn't try.** It gates the data.
+
+## The move — gate the data, not the prompt
+
+```text
+raw record ─▶ protect() ─▶ embed ─▶ vector store ─▶ retrieve ─▶ LLM prompt ─▶ answer ─▶ reveal() ─▶ user
+            (Protegrity)             (tokens)                    (tokens)      (tokens)   ▲ authorized only
+```
+
+Ingest is the first thing to touch the data; detokenization is the last, and only for a caller that passes policy. Between them, the vector DB, the embeddings, and the LLM handle **only tokens**. Win the prompt, steal the store, dump the logs — the loot is worthless.
+
+## Run the attack yourself (offline, no API keys)
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python app.py          # narrated demo
-pytest -q              # the security assertions
+python attack_demo.py   # split-screen: naive leaks people, AEGIS leaks tokens (same injection)
+python benchmark.py     # the privacy/utility table + a live re-identification attack
+pytest -q               # the security assertions (incl. one HONEST xfail — see below)
 ```
 
-Defaults use a **MockProtector** (deterministic, offline stand-in for Protegrity
-Developer Edition) and a **MockLLM** (no key), so the whole pipeline is runnable
-today. Swapping in the real backends is a set of env flags — see
-[`.env.example`](.env.example).
+Runs on a deterministic offline `MockProtector` + `MockLLM`. Real backends are env flags (`.env.example`).
 
-## What the demo shows
+## The numbers (measured, not claimed) — `python benchmark.py`
 
-`python app.py` walks through, on synthetic support-ticket data:
+| strategy | topic recall | **identifier recall** | store leak | exfil leak | **authorized reveal** | **re-id attack** |
+|---|---|---|---|---|---|---|
+| none (naive) | 1.00 | 0.50 | 1.00 | 1.00 | 1.00 | 0.83 |
+| mask `[REDACTED]` | 1.00 | 0.50 | 0.00 | 0.00 | **0.00** | 0.17 |
+| **tokenize (AEGIS)** | 1.00 | **1.00** | **0.00** | **0.00** | **1.00** | **0.17** |
 
-1. **Attacker view** — the entire vector store dumped: every name / email / SSN /
-   phone is a `tok:…` handle. Zero raw PII at rest.
-2. **The LLM prompt** — tokens only. A prompt-log leak exposes tokens.
-3. **Unauthorized caller** — the answer stays tokenized.
-4. **Authorized caller** (role + purpose pass policy) — detokenized output, and
-   *only here* does raw PII appear.
+AEGIS is the only row that's good in every column: **zero leakage, identifier lookup works, authorized callers still resolve, and the re-identification attack drops to chance.** Masking buys privacy by destroying utility (lookup dies, the value is gone forever). Naive keeps utility but its embeddings re-identify people 83% of the time. **Same privacy as masking, the utility of plaintext.**
 
-## The security property, as a test
+## What this is NOT (the honesty box)
 
-`tests/test_no_raw_leak.py` asserts the whole point automatically:
+- **Not** a prompt-injection *preventer*. The injection still succeeds — AEGIS makes the loot worthless.
+- **Not** novel tokenization. The pattern is productized (Skyflow LLM Privacy Vault) and open-source (Microsoft Presidio). What's original here is the **adversarial proof + the authorized-reveal gate + the honest measurement**, not the architecture.
+- **Not** "never exposed." Free-text PII protection = **detector recall**: regex under the mock (misses names in prose — see the `xfail` in `tests/`), real NER under Protegrity (`find_and_protect` catches PERSON). We *measure* the gap; we don't hide it.
+- **Not** air-gapped. Protegrity's tokenization crypto is a hosted API call (rate-limited); the discovery/guardrail pieces run local.
 
-- no raw PII in the vector store
-- no raw PII in the LLM prompt
-- an unauthorized caller never receives raw PII
-- an authorized caller *can* detokenize
+## Where this sits (prior art — cited on purpose)
 
-```
-$ pytest -q
-....                                                4 passed
-```
+- **Control-flow defenses** (DeepMind CaMeL, the Dual-LLM pattern, the lethal trifecta) gate *what the agent is allowed to do*. AEGIS is the **data-layer complement**: it gates *what the data is worth if stolen*. They stop the action; this neutralizes the loot.
+- **Tokenization for AI** (Skyflow, Presidio, Protegrity) is the established pattern. AEGIS is a concrete, benchmarked, *attacked* instance — and the pattern is vendor-agnostic; Protegrity is one implementation.
 
-## How this maps to Protegrity Developer Edition
+## The Protegrity swap (one class)
 
-The pipeline is identical whether it runs on the mock or the real backend — only
-the `Protector` implementation changes:
+The pipeline is identical on the mock or on real Protegrity Developer Edition — only `aegis/protection.py`'s `ProtegrityProtector` changes, plus env flags:
 
-| Today (offline)                    | Submission (real)                                   |
-|------------------------------------|-----------------------------------------------------|
-| `MockProtector` (deterministic)    | `ProtegrityProtector` → Developer Edition `protect()` / `unprotect()` |
-| local vault map                    | Protegrity protected store + **policy engine**      |
-| `AEGIS_PROTECTOR=mock`             | `AEGIS_PROTECTOR=protegrity`                         |
+| | offline (today) | real (submission) |
+|---|---|---|
+| protection | `MockProtector` (regex) | `ProtegrityProtector` → `find_and_protect` (PERSON NER) + `appython` structured + RBAC |
+| flag | `AEGIS_PROTECTOR=mock` | `AEGIS_PROTECTOR=protegrity` |
 
-The swap point is one class in [`aegis/protection.py`](aegis/protection.py)
-(`ProtegrityProtector`, with the expected `protect`/`unprotect` shape and TODOs).
-In production, prefer Protegrity's own policy engine to enforce `unprotect`
-authorization — the demo's [`policy.py`](aegis/policy.py) is the stand-in.
+The `ProtegrityProtector` is written against the published API (`protegrity-developer-python`), ready to activate the moment DE access lands — and its NER closes the name-recall gap automatically.
 
-## Project structure
+## Structure
 
 ```
 aegis/
-  protection.py   Protector interface · MockProtector · ProtegrityProtector (swap point)
-  pii.py          detect + tokenize PII hiding in free text
-  ingest.py       protect records BEFORE anything else touches them
-  vectorstore.py  embedder (hash | minilm) + in-memory cosine store (protected text only)
+  protection.py   Protector interface · Naive / Mask / Mock / Protegrity backends (the swap point)
+  pii.py          regex PII detection (mock free-text path; real path = Protegrity NER)
+  ingest.py       protect BEFORE anything touches the data
+  vectorstore.py  embedder + in-memory cosine store (protected text only)
   llm.py          provider-agnostic (mock | openai | anthropic) — only ever sees tokens
-  policy.py       authorization for detokenization (stand-in for Protegrity policy)
-  pipeline.py     orchestrator: ingest → embed → retrieve → prompt → LLM → reveal
-app.py            narrated demo CLI
-data/             synthetic PII records
-tests/            the "no raw leak" security assertions
+  policy.py       authorization for detokenization (stand-in for Protegrity's policy engine)
+  pipeline.py     orchestrator + query-side tokenization (identifier lookup on protected data)
+app.py            narrated demo
+attack_demo.py    the money-shot: same injection, naive vs AEGIS
+benchmark.py      the privacy/utility table + a runnable re-identification attack
+tests/            the security assertions, with an independent oracle
 ```
 
-## Upgrades toward the final submission
-
-- **Real embeddings:** `AEGIS_EMBEDDER=minilm` (sentence-transformers all-MiniLM-L6-v2).
-- **Real LLM:** `AEGIS_LLM=anthropic` (or `openai`) + a key.
-- **Real protection:** implement `ProtegrityProtector` + `AEGIS_PROTECTOR=protegrity` once Developer Edition access lands.
-- **Record** the 10–15 min demo — outline in [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
-
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the data-flow diagram, threat model,
-and OWASP LLM Top 10 mapping.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the threat model, the per-layer attack table, and the OWASP LLM08/LLM02 mapping.
 
 ---
 
-*Built by Ash Clements (BadAsh99). AISeal (OWASP LLM Top 10 scanner) and
-badash-killchain (agent/RAG trust-boundary research) inform the threat model.*
+*Built by Ash Clements (BadAsh99). Companion to AISeal (OWASP LLM Top 10 scanner) and Gray Swan red-team work — I break models, then build the layer that makes the breaks worthless.*
