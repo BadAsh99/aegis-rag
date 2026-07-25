@@ -1,4 +1,4 @@
-"""The security assertions — with an INDEPENDENT oracle.
+"""The security assertions, with an INDEPENDENT oracle.
 
 The earlier version built its ground-truth PII set from the pipeline's own
 detector, so it was blind to exactly what the detector missed (the certifier's
@@ -19,12 +19,12 @@ DATA = os.path.join(ROOT, "data", "sample_records.json")
 with open(DATA) as _f:
     SAMPLE = json.load(_f)
 
-# INDEPENDENT oracle — hardcoded, NOT derived from the pipeline's detector.
+# INDEPENDENT oracle, hardcoded, NOT derived from the pipeline's detector.
 STRUCTURED_PII = sorted({
     r[k] for r in SAMPLE for k in ("name", "email", "phone", "ssn") if r.get(k)
 })
 
-# A record with third-party names buried in free text — the case regex misses.
+# A record with third-party names buried in free text, the case regex misses.
 NAME_IN_BODY_FIXTURE = [{
     "id": "TKT-9001", "name": "Robin Vale", "email": "robin.vale@example.com",
     "phone": "480-555-0130", "ssn": "900-30-0111", "category": "account",
@@ -85,7 +85,7 @@ def test_scope_bound_reveal_contains_blast_radius():
 def test_query_side_tokenization_finds_by_identifier():
     # Item-2 fix: an identifier query works because the query's PII is tokenized
     # with the same deterministic protector and matches the store's token exactly.
-    # (Phone is detectable by the mock; names need Protegrity's PERSON NER — same
+    # (Phone is detectable by the mock; names need Protegrity's PERSON NER, same
     # mechanism, better detector.)
     hits = fresh().retrieve("who is reachable at 602-555-0148?", k=3)
     ids = [d.get("id") for d, _ in hits]
@@ -95,7 +95,7 @@ def test_query_side_tokenization_finds_by_identifier():
 @pytest.mark.xfail(
     reason="MockProtector uses regexes, not PERSON NER, so names in free text leak. "
            "Real Protegrity find_and_protect (PERSON) closes this. The residual risk "
-           "is detector recall — we measure it, we don't hide it.",
+           "is detector recall, we measure it, we don't hide it.",
     strict=False,
 )
 def test_no_freetext_names_leak():

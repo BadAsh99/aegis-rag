@@ -5,7 +5,7 @@ free-text bodies ("call me at 602-555-0148"). This tokenizes those in place so
 even the unstructured text is safe before it ever reaches the embedder.
 
 For production, swap these regexes for Protegrity's classifiers / a proper NER
-model — the seam is the same.
+model, the seam is the same.
 """
 import re
 

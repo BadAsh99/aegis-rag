@@ -1,7 +1,7 @@
 """AEGIS orchestrator: ingest -> embed/store -> retrieve -> prompt -> LLM -> reveal.
 
 Everything from ingest through the LLM handles ONLY tokens. Detokenization
-happens exactly once, at the very end, gated by policy — and it runs through the
+happens exactly once, at the very end, gated by policy, and it runs through the
 Protector so token *recognition* is never hardcoded to one backend's format.
 
 Retrieval is hybrid:
@@ -23,7 +23,7 @@ from .vectorstore import VectorStore, get_embedder
 
 PROMPT_TEMPLATE = (
     "You are a support assistant. Answer using ONLY the context below. "
-    "Identifiers appear as tokens (opaque handles) — never invent the real value.\n\n"
+    "Identifiers appear as tokens (opaque handles), never invent the real value.\n\n"
     "QUESTION: {q}\n\nCONTEXT:\n{ctx}\n"
 )
 
@@ -52,7 +52,7 @@ class Aegis:
         protected_q = self.protector.protect_freetext(question)
         q_tokens = self.protector.tokens_in(protected_q)
         # FAIR BASELINE: a plaintext store can exact-match the raw identifier, so
-        # give every protector its own exact-match key — tokens for tokenizing
+        # give every protector its own exact-match key, tokens for tokenizing
         # backends, raw spans for naive. (Without this, naive is handicapped and
         # the identifier-recall comparison is rigged; the audit flagged that.)
         raw_ids = {span for _label, span in find_pii(question)}

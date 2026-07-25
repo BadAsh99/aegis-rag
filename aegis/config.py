@@ -1,4 +1,4 @@
-"""Runtime config — swap mock <-> real via environment flags. See .env.example.
+"""Runtime config, swap mock <-> real via environment flags. See .env.example.
 
 The whole point of AEGIS: the pipeline is identical whether it runs on the
 MockProtector (today, offline) or Protegrity Developer Edition (once access

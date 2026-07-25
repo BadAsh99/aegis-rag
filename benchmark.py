@@ -1,4 +1,4 @@
-"""AEGIS benchmark — the privacy/utility table, run honestly.
+"""AEGIS benchmark, the privacy/utility table, run honestly.
 
 Three strategies, same corpus + queries, measured together:
 
@@ -6,7 +6,7 @@ Three strategies, same corpus + queries, measured together:
 
 Metrics:
   - topic recall@3        (utility: does topic retrieval still work?)
-  - identifier recall@3   (utility: look a record up by its PII — FAIR: the naive
+  - identifier recall@3   (utility: look a record up by its PII, FAIR: the naive
                            baseline gets raw-substring match, AEGIS gets token
                            match, so nobody is handicapped)
   - store leakage         (privacy: % of records with raw PII at rest)
@@ -19,13 +19,13 @@ Metrics:
 HONESTY (rebuilt after a 4-agent audit):
   * Embedder: prints which one actually ran. Install sentence-transformers to
     measure REAL semantic retrieval; otherwise it's a lexical hash embedder and
-    "topic recall" is a lexical-overlap result, not a semantic one — stated, not
+    "topic recall" is a lexical-overlap result, not a semantic one, stated, not
     hidden.
   * The re-id column is a LEXICAL proxy: it links a stolen record to a name by
     nearest-neighbour over the stored text. It demonstrates that tokenized text
     doesn't carry the name; it is NOT the full embedding-inversion attack. The
     production attack is Vec2Text (Morris et al. 2023, ~92% exact recovery from
-    ada-002) — a SEPARATE, stronger attack documented in invert_vec2text(), not
+    ada-002), a SEPARATE, stronger attack documented in invert_vec2text(), not
     claimed as run here.
   * N is small (see printed corpus size): these numbers are illustrative of the
     architecture's behaviour, not a statistically-powered benchmark.
@@ -74,7 +74,7 @@ def _resolve_embedder():
     try:
         return get_embedder("minilm", config.MINILM_MODEL), "minilm (real semantic)"
     except Exception:
-        return get_embedder("hash", config.MINILM_MODEL), "hash (LEXICAL fallback — topic recall is lexical, install sentence-transformers for semantic)"
+        return get_embedder("hash", config.MINILM_MODEL), "hash (LEXICAL fallback, topic recall is lexical, install sentence-transformers for semantic)"
 
 
 def build(kind, embedder):
@@ -119,7 +119,7 @@ def authorized_reveal(a):
 
 def reid_lexical(a):
     """Steal the store, link each record back to a person by nearest name over the
-    STORED text (a lexical proxy for embedding inversion — not Vec2Text)."""
+    STORED text (a lexical proxy for embedding inversion, not Vec2Text)."""
     names = [r["name"] for r in SAMPLE]
     cand = np.asarray(a.embedder.encode([f"customer {n}" for n in names]), dtype=np.float32)
     correct = total = 0
@@ -166,7 +166,7 @@ def main():
             "authorized reveal", "name re-id (lexical)"]
     w = 22
     print("\n" + "=" * 100)
-    print("AEGIS benchmark — privacy vs utility (higher recall/reveal = better; lower leakage/re-id = better)")
+    print("AEGIS benchmark, privacy vs utility (higher recall/reveal = better; lower leakage/re-id = better)")
     print(f"corpus N={len(SAMPLE)} records (+1 poisoned)   ·   embedder: {embed_label}")
     print("=" * 100)
     head = f"{'strategy':<20}" + "".join(f"{c:>{w}}" for c in cols)
@@ -183,10 +183,10 @@ def main():
     print("  - mask:  low leakage BUT identifier lookup dies and the value is gone forever (reveal=0).")
     print("  - AEGIS: MATCHES plaintext utility (topic + identifier lookup) with ZERO leakage,")
     print("           AND the scoped caller still resolves. Mask's privacy, plaintext's utility.")
-    print("  Re-id is a LEXICAL proxy; the real attack is Vec2Text (Morris 2023) — see invert_vec2text().")
+    print("  Re-id is a LEXICAL proxy; the real attack is Vec2Text (Morris 2023), see invert_vec2text().")
     print(f"  N={len(SAMPLE)}: illustrative of behaviour, not a powered benchmark.\n")
 
-    # invariants (so the table isn't cherry-picked) — fair baseline, honest bounds
+    # invariants (so the table isn't cherry-picked), fair baseline, honest bounds
     assert none["store leakage"] > 0.9 and aegis["store leakage"] < 0.1, "store-leak invariant"
     assert aegis["exfil leakage"] == 0.0 and none["exfil leakage"] == 1.0, "exfil invariant"
     # AEGIS matches the fair plaintext baseline on identifier lookup and beats mask

@@ -1,8 +1,8 @@
-"""Authorization policy for detokenization — SCOPE-bound, not just role-bound.
+"""Authorization policy for detokenization, SCOPE-bound, not just role-bound.
 
 The finding that reshaped this: a role check ("are you a support agent?") lets an
 injected agent reveal EVERY customer's tokens in the retrieved context. The fix is
-to authorize by SCOPE — the specific records the caller legitimately opened — so an
+to authorize by SCOPE, the specific records the caller legitimately opened, so an
 injection that dumps other people's tokens yields tokens even for an authorized
 agent. A support agent working ticket TKT-1001 holds scope {"TKT-1001"}; break-glass
 admin holds ALL (still logged to the reveal ledger).

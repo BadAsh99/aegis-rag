@@ -2,7 +2,7 @@
 
 Structured PII fields are tokenized by name with the right data-element; the
 free-text body goes through protect_freetext(), which is regex-based under the
-mock (misses names — an honest, tested gap) and NER-based under real Protegrity
+mock (misses names, an honest, tested gap) and NER-based under real Protegrity
 (find_and_protect catches PERSON). The `text` we embed is category + protected
 customer handle + protected body: topic words survive so retrieval works, and
 every detected identifier is already a token.

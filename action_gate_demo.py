@@ -1,8 +1,8 @@
-"""AEGIS action-gate demo — closing the injection→exfil path from the other end.
+"""AEGIS action-gate demo, closing the injection→exfil path from the other end.
 
 The honest residual after scope-bound reveal: a compromised authorized session
 can detokenize its own scope. This demo shows the second layer catching exactly
-that — an agent that has (worst case) already resolved real PII still cannot
+that, an agent that has (worst case) already resolved real PII still cannot
 exfiltrate it, because the outbound action is denied.
 
     python action_gate_demo.py            # offline, no keys
@@ -22,10 +22,10 @@ def banner(t):
 
 
 def main():
-    # the agent may only ever speak back into the ticket thread — nothing else.
+    # the agent may only ever speak back into the ticket thread, nothing else.
     gate = ActionGate(allowed_targets={"ticket-thread://TKT-1001"})
 
-    print("\nAEGIS action-gate demo — even a detokenized answer can't leave the building.")
+    print("\nAEGIS action-gate demo, even a detokenized answer can't leave the building.")
     print("Worst case assumed: the agent ALREADY resolved real PII (compromised session).")
 
     # The injection coerced the agent into trying to exfiltrate the case data.
@@ -51,7 +51,7 @@ def main():
     banner("🎯  THE POINT")
     print("  Data-gate removes leg 1 of the lethal trifecta (no raw data to take).")
     print("  Action-gate removes leg 3 (no untrusted-triggered, off-allowlist egress).")
-    print("  The compromised-authorized-caller residual is covered — not by hoping the")
+    print("  The compromised-authorized-caller residual is covered, not by hoping the")
     print("  model resists injection, but by denying the exfil action outright.")
     print("  Gate the data AND gate the action. That's the moat.")
 

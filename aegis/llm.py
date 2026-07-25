@@ -14,7 +14,7 @@ class MockLLM:
         ctx = prompt.split("CONTEXT:", 1)[-1].strip()
         return (
             "[MOCK-LLM] Answer grounded strictly in the retrieved records below. "
-            "Every identifier here is a token — the model never received raw PII:\n"
+            "Every identifier here is a token, the model never received raw PII:\n"
             + ctx[:800]
         )
 

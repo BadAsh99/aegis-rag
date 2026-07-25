@@ -1,19 +1,19 @@
-"""Data-protection backends — the seam the whole demo turns on.
+"""Data-protection backends, the seam the whole demo turns on.
 
     protect(value, owner=…)        -> token   (safe to embed / store / prompt)
     protect_freetext(text, owner=…)-> text with PII spans tokenized in place
     reveal(text, scope=…)          -> detokenize ONLY tokens the scope authorizes
     tokens_in(text)                -> tokens present (for exact-identifier retrieval)
 
-THE KEYSTONE — scope-bound reveal (fixes the authorized-path leak):
+THE KEYSTONE, scope-bound reveal (fixes the authorized-path leak):
 Every token records its OWNER (the record it came from). `reveal` takes a SCOPE:
     "*"            -> break-glass / admin: detokenize everything (logged)
     {"TKT-1001"}   -> detokenize only tokens owned by those records
     set() / None   -> detokenize nothing (anonymous)
 So an injection that coerces the model into dumping *other* customers' tokens
-yields tokens even for an authorized agent — the agent only holds scope for the
+yields tokens even for an authorized agent, the agent only holds scope for the
 case it actually opened. Role-gating asked "are you a support agent?"; scope-
-gating asks "are you entitled to THIS person's data?" — the question that matters.
+gating asks "are you entitled to THIS person's data?", the question that matters.
 
 TWO THINGS COMPOSE ON THE SAME GATE:
   - honeytokens: canary records no legit query touches. A reveal attempt against
@@ -22,7 +22,7 @@ TWO THINGS COMPOSE ON THE SAME GATE:
     purpose-bound audit receipt (zero-standing-PII → GDPR Art.30 / EU AI Act).
 
 HONESTY NOTE: the mock detects free-text PII with regexes only (no PERSON NER),
-so it MISSES names in prose — a real residual risk = detector recall, proved by
+so it MISSES names in prose, a real residual risk = detector recall, proved by
 tests/test_no_raw_leak.py (an xfail), not hidden. Protegrity find_and_protect()
 closes it with a real classifier. We measure this; we never claim "never."
 """
@@ -109,7 +109,7 @@ class MockProtector(Protector):
     """Deterministic, offline stand-in for Protegrity Developer Edition.
 
     NOT for production. Keeps a local vault so the pipeline runs without the SDK.
-    Free-text detection is regex-only (no name NER) — an honest, measured gap.
+    Free-text detection is regex-only (no name NER), an honest, measured gap.
     Implements scope-bound reveal + the honeytoken tripwire + the reveal ledger.
     """
 
@@ -204,7 +204,7 @@ def _scope_str(scope) -> str:
 
 
 class NaiveProtector(Protector):
-    """The 'before' — no protection. Raw PII flows into the store, the prompt,
+    """The 'before', no protection. Raw PII flows into the store, the prompt,
     and the attacker's exfil channel. Same pipeline, this protector swapped in.
     """
 
@@ -225,7 +225,7 @@ class NaiveProtector(Protector):
 
 
 class MaskProtector(Protector):
-    """Blanket redaction — the naive 'privacy' baseline. Kills leakage BUT
+    """Blanket redaction, the naive 'privacy' baseline. Kills leakage BUT
     destroys referential integrity (every value -> one [REDACTED]): can't tell
     records apart, can't look up by identifier, can NEVER get the value back.
     The benchmark shows tokenization beats this: same privacy, far more utility.
@@ -244,7 +244,7 @@ class MaskProtector(Protector):
         return text
 
     def reveal(self, text: str, *, scope, purpose: str = "unspecified") -> str:
-        return text  # can't un-redact — the value is gone
+        return text  # can't un-redact, the value is gone
 
     def unprotect(self, token: str, *, authorized: bool, data_element: str = "text") -> str:
         return token
@@ -268,7 +268,7 @@ class ProtegrityProtector(Protector):
 
     Requires: `pip install protegrity-developer-python`, DE registration, creds in
     env (DEV_EDITION_EMAIL / DEV_EDITION_PASSWORD / DEV_EDITION_API_KEY). Crypto is
-    a hosted API call (NOT local), rate-limited (10k req/day, 1MB) — batch large
+    a hosted API call (NOT local), rate-limited (10k req/day, 1MB), batch large
     ingests. Verify exact method names against the installed SDK version.
     """
 
