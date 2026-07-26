@@ -251,37 +251,47 @@ class MaskProtector(Protector):
 
 
 class ProtegrityProtector(Protector):
-    """Real Protegrity Developer Edition adapter.
+    """Real Protegrity AI Developer Edition adapter.
 
-    Implemented against the published API (PyPI `protegrity-developer-python`,
-    developer.docs.protegrity.com). Two surfaces:
-      - free text:  protegrity_developer_python.find_and_protect / find_and_unprotect
-                    (built-in PII NER incl. PERSON -> closes the name-leak gap)
-      - structured: appython.Protector().create_session(user).protect/unprotect(v, data_element)
-                    (RBAC policy engine enforces who may unprotect)
+    Reconciled 2026-07-26 against the INSTALLED SDK (PyPI `protegrity-developer-python`
+    v1.1.1). The Developer Edition surface is NER-over-text, not a per-field crypto
+    session:
+      - configure(endpoint_url=...)        one-time setup pointing at the DE discovery
+                                           + protection API. The endpoint + any API key
+                                           arrive with the DE "resources" email; set
+                                           AEGIS_PROTEGRITY_ENDPOINT.
+      - find_and_protect(text) -> str      detect PII (PERSON, EMAIL_ADDRESS,
+                                           SOCIAL_SECURITY_ID, PHONE_NUMBER, ... see
+                                           DATA_ELEMENT_MAPPING) and tokenize those
+                                           spans in place. The real classifier that
+                                           closes the mock's free-text name-leak gap.
+      - find_and_unprotect(text) -> str    detokenize (policy-gated server-side).
 
-    Scope-bound reveal maps onto Protegrity's policy engine: production scoping is
-    row/data-element policy (the session's authorized user + purpose), so an
-    out-of-scope token detokenizes to itself. Here we enforce scope in-adapter
-    (owner map) and use the session only for the crypto, which is the honest
-    division until DE policies are authored.
-
-    Requires: `pip install protegrity-developer-python`, DE registration, creds in
-    env (DEV_EDITION_EMAIL / DEV_EDITION_PASSWORD / DEV_EDITION_API_KEY). Crypto is
-    a hosted API call (NOT local), rate-limited (10k req/day, 1MB), batch large
-    ingests. Verify exact method names against the installed SDK version.
+    NOTE: the enterprise Application Protector (`appython`) is a DIFFERENT product that
+    needs a Protegrity gateway/policy deployment; it is NOT the Developer Edition path,
+    so the earlier appython.create_session().protect() structured code was wrong and is
+    removed. Structured field values run through the same NER+tokenize call, which is
+    DE-native and deterministic (same value -> same token), so identifier retrieval
+    still works. Scope-bound reveal + per-token owner tracking are enforced in-adapter
+    for the structured path; free-text token ownership is only fully recoverable via DE
+    policy (production expresses scope as DE row/data-element policy). VERIFIED: the API
+    names below exist in v1.1.1. UNVERIFIED offline: live protect/unprotect round-trips
+    need the DE endpoint + credentials.
     """
 
-    def __init__(self, policy_user: str | None = None):
+    def __init__(self, endpoint_url: str | None = None):
         import os
 
-        import protegrity_developer_python as pdp  # noqa: local import (mock mode never hits this)
-        from appython import Protector as PtyProtector
+        import protegrity_developer_python as pdp  # local import: never loads in mock mode
 
         self._pdp = pdp
-        self._user = policy_user or os.getenv("AEGIS_POLICY_USER", "superuser")
-        self._session = PtyProtector().create_session(self._user)
-        self._owner: dict[str, str | None] = {}  # token -> owner (scope enforcement)
+        endpoint = endpoint_url or os.getenv("AEGIS_PROTEGRITY_ENDPOINT")
+        # find_and_protect already tokenizes reversibly; `method` (redact|mask) only
+        # applies to the redact path, so we leave it default. configure() just needs the
+        # DE endpoint (arrives with the "resources" email); config only, no network yet.
+        if endpoint:
+            pdp.configure(endpoint_url=endpoint)
+        self._owner: dict[str, str | None] = {}  # token -> owner (structured-path scope)
         self.alerts: list[Alert] = []
         self.ledger: list[RevealEvent] = []
         self._canaries: set[str] = set()
@@ -292,45 +302,48 @@ class ProtegrityProtector(Protector):
     def protect(self, value: str, data_element: str = "text", owner: str | None = None) -> str:
         if value is None:
             return value
-        token = self._session.protect(str(value), data_element)
+        # DE-native: NER+tokenize the single value. A recognized PII value comes back
+        # tokenized (deterministic); a non-PII identifier is returned unchanged.
+        token = self._pdp.find_and_protect(str(value))
         self._owner[token] = owner
         return token
 
     def protect_freetext(self, text: str, owner: str | None = None) -> str:
-        # NER + tokenize PII spans (PERSON, SSN, EMAIL, ...) in one call.
-        return self._pdp.find_and_protect(text)
+        # One call detects + tokenizes every PII span (PERSON, SSN, EMAIL, ...).
+        out = self._pdp.find_and_protect(text)
+        for t in self.tokens_in(text):  # stamp owners for scope-bound reveal
+            self._owner.setdefault(t, owner)
+        return out
 
     def reveal(self, text: str, *, scope, purpose: str = "unspecified") -> str:
-        # Deterministic FPE tokens aren't regex-findable, so reveal the whole
-        # string only when the caller holds full scope; otherwise leave tokenized.
-        # (Production: express scope as Protegrity row/data-element policy so this
-        # is enforced token-by-token by the policy engine, not string-wise.)
-        if scope == ALL or (scope and self._owner and set(self._owner.values()) <= set(scope)):
+        # DE tokens are not regex-findable, so gate string-wise: detokenize only when
+        # the caller holds full scope (or owns every tracked token); else leave as-is.
+        # Production: express scope as DE row/data-element policy, enforced token-wise.
+        owners = {o for o in self._owner.values() if o is not None}
+        if scope == ALL or (scope and owners and owners <= set(scope)):
             return self._pdp.find_and_unprotect(text)
         return text
 
     def unprotect(self, token: str, *, authorized: bool, data_element: str = "text") -> str:
         if not authorized:
             raise ProtectionError("unprotect denied: caller not authorized by policy")
-        return self._session.unprotect(token, data_element)
+        return self._pdp.find_and_unprotect(token)
 
     def tokens_in(self, text: str) -> set[str]:
-        # Protegrity FPE is deterministic: same value -> same token. So identifier
-        # retrieval works by tokenizing the query's identifier with the same data
-        # element and exact-matching the resulting token against the store. We
-        # recover query tokens by protecting candidate identifier spans, so this is
-        # NOT empty on the real backend (the earlier stub was the mock-only gap).
-        from .pii import PATTERNS
+        # Deterministic: protecting a value yields the same token the store holds, so
+        # identifier retrieval works. Recover query tokens by protecting each detected
+        # PII span and keeping the ones that actually changed.
+        from .pii import find_pii
 
         toks: set[str] = set()
-        for label, pat in PATTERNS:
-            for m in pat.findall(text):
-                try:
-                    toks.add(self._session.protect(m, label))
-                except Exception:
-                    continue
+        for _label, span in find_pii(text):
+            try:
+                out = self._pdp.find_and_protect(span)
+                if out and out != span:
+                    toks.add(out)
+            except Exception:
+                continue
         return toks
-
 
 def get_protector(kind: str) -> Protector:
     kind = (kind or "mock").lower()

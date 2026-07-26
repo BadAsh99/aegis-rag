@@ -10,4 +10,4 @@ pytest>=7.0
 # anthropic>=0.30
 
 # Real data protection (set AEGIS_PROTECTOR=protegrity):
-# add the Protegrity Developer Edition SDK/client here once access lands.
+protegrity-developer-python>=1.1.1
