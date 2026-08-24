@@ -4,13 +4,16 @@
 #   ./demo.sh              # Enter-to-advance between sections (narrate, then Enter)
 #   DEMO_PAUSE=0 ./demo.sh # auto-advance on timers (hands-free, for a silent take)
 #
-# For the FINAL recording on real Protegrity, first:
-#   export AEGIS_PROTECTOR=protegrity AEGIS_PROTEGRITY_ENDPOINT=<url>   # (+ the DE key)
-#   export ANTHROPIC_API_KEY=<key>                                     # for the real-model segment
+# Configuration and secrets come from a gitignored .env, loaded below. Copy
+# .env.example to .env and fill it in. Do NOT `export SOMETHING=<secret>` on the
+# command line: that puts the value in your shell history and leaves it sitting in
+# terminal scrollback, which is exactly how a key ends up in a recorded demo.
 set -uo pipefail
 cd "$(dirname "$0")"
 # shellcheck disable=SC1091
 source .venv/bin/activate 2>/dev/null || true
+# shellcheck disable=SC1091
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
 
 PAUSE="${DEMO_PAUSE:-1}"
 CY='\033[1;36m'; DIM='\033[2m'; RST='\033[0m'
