@@ -12,3 +12,6 @@ env/
 
 # internal content strategy drafts, not part of the submission
 CONTENT_PHASE7.md
+
+# raw screen-recording takes, hundreds of MB, never commit
+recordings/

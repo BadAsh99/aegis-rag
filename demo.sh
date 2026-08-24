@@ -19,6 +19,7 @@ if [ -f .env ]; then set -a; . ./.env; set +a; fi
 # unauthenticated-Hub warning print on every model load and read as errors in a
 # recorded walkthrough.
 export HF_HUB_DISABLE_PROGRESS_BARS=1
+export HF_HUB_VERBOSITY=error
 export HF_HUB_DISABLE_TELEMETRY=1
 export TRANSFORMERS_VERBOSITY=error
 export TOKENIZERS_PARALLELISM=false
