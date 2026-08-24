@@ -25,10 +25,33 @@ export TRANSFORMERS_VERBOSITY=error
 export TOKENIZERS_PARALLELISM=false
 export PYTHONWARNINGS=ignore
 
+# PAUSE=1     Enter-to-advance. Narrate, press Enter, cut between takes.
+# PAUSE=0     auto-advance on the short timers below. Fast silent run-through.
+# PAUSE=narrate  auto-advance on timers matched to DEMO_NARRATION.md, so a single
+#             unbroken take can be narrated live with no keyboard at all. Scale
+#             everything with DEMO_SPEED (e.g. DEMO_SPEED=1.2 for 20% longer).
 PAUSE="${DEMO_PAUSE:-1}"
+SPEED="${DEMO_SPEED:-1}"
 CY='\033[1;36m'; DIM='\033[2m'; RST='\033[0m'
 banner(){ printf "\n${CY}========================================================================\n%s\n========================================================================${RST}\n\n" "$1"; }
-step(){ if [ "$PAUSE" = "1" ]; then printf "${DIM}"; read -rp "  (press Enter for the next section) "; printf "${RST}"; else sleep "${1:-3}"; fi; }
+
+# Seconds per section in narrate mode, in demo order: intro, attack, detection,
+# action-gate, real-model, numbers, protegrity. Taken from the script's targets
+# plus a few seconds of breathing room at each end.
+NARRATE_SECS="60 120 90 75 95 105 155"
+_sec_i=0
+step(){
+  case "$PAUSE" in
+    1) printf "${DIM}"; read -rp "  (press Enter for the next section) "; printf "${RST}" ;;
+    narrate)
+      _sec_i=$((_sec_i + 1))
+      s=$(echo "$NARRATE_SECS" | cut -d' ' -f"$_sec_i")
+      [ -n "$s" ] || s=60
+      sleep "$(echo "$s $SPEED" | awk '{printf "%.0f", $1 * $2}')"
+      ;;
+    *) sleep "${1:-3}" ;;
+  esac
+}
 
 clear
 banner "AEGIS  ·  Protegrity 2026 AI Pipeline Security Hackathon
