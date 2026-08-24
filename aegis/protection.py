@@ -279,6 +279,32 @@ class ProtegrityProtector(Protector):
     need the DE endpoint + credentials.
     """
 
+    # The entity types AEGIS requires to be tokenized. This doubles as the
+    # named_entity_map handed to configure(); omitting it makes find_and_protect a
+    # silent no-op. A bare field value ("Jordan Rivera") carries less context than
+    # the same name in prose, so the threshold is lower here than for free text.
+    #
+    # An entity the classifier recognises but this map omits is logged at WARNING and
+    # then passed through RAW ("no mapping found ... skipping protection"), so the
+    # list must cover every type these fields can be read as. HEALTH_CARE_ID is here
+    # because the classifier reads some SSN-shaped values as a health identifier
+    # rather than SOCIAL_SECURITY_ID; omitting it leaked those values in full.
+    # Handing over the entire DATA_ELEMENT_MAPPING is NOT the fix: it tokenizes
+    # ticket ids and categories too, which destroys identifier retrieval.
+    #
+    # KNOWN LIMITATION, 2026-08-24: with this map the security suite still shows 2
+    # failures against live DE (store + scope-bound reveal). Widening the map to the
+    # full taxonomy makes it 5, by tokenizing ticket ids and breaking retrieval. The
+    # classifier's per-value typing of bare field values is not yet stable enough for
+    # the structured path, so AEGIS_PROTECTOR defaults to `mock` and DE is exercised
+    # through protegrity_showcase.py. Free-text protection via DE is solid; it is
+    # per-field structured protection that needs more work. Do not ship
+    # AEGIS_PROTECTOR=protegrity until `pytest -q` is green.
+    PROTECTED_ENTITIES = (
+        "PERSON", "EMAIL_ADDRESS", "SOCIAL_SECURITY_ID", "HEALTH_CARE_ID",
+        "PHONE_NUMBER", "CREDIT_CARD", "BANK_ACCOUNT", "ACCOUNT_NUMBER",
+    )
+
     def __init__(self, endpoint_url: str | None = None):
         import os
 
@@ -286,11 +312,16 @@ class ProtegrityProtector(Protector):
 
         self._pdp = pdp
         endpoint = endpoint_url or os.getenv("AEGIS_PROTEGRITY_ENDPOINT")
-        # find_and_protect already tokenizes reversibly; `method` (redact|mask) only
-        # applies to the redact path, so we leave it default. configure() just needs the
-        # DE endpoint (arrives with the "resources" email); config only, no network yet.
+        # CRITICAL: configure() MUST be given a named_entity_map. Without it the SDK
+        # silently returns the input unchanged, with no exception and no warning, so
+        # protect() becomes a no-op and raw PII flows into the store and the prompt.
+        # The security tests catch it; nothing else does. See DEVELOPER_FEEDBACK.md.
         if endpoint:
-            pdp.configure(endpoint_url=endpoint)
+            pdp.configure(
+                endpoint_url=endpoint,
+                named_entity_map={e: e for e in self.PROTECTED_ENTITIES},
+                classification_score_threshold=0.4,
+            )
         self._owner: dict[str, str | None] = {}  # token -> owner (structured-path scope)
         self.alerts: list[Alert] = []
         self.ledger: list[RevealEvent] = []

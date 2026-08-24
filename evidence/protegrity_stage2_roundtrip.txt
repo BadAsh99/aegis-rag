@@ -1,0 +1,49 @@
+Protegrity AI Developer Edition, hosted Protection API
+Live reversible tokenize / detokenize round trip
+Captured 2026-08-24 14:20 MST from `python protegrity_showcase.py`
+
+This is the verbatim Stage 2 output from a live call against
+https://api.developer-edition.protegrity.com. It is recorded here because the
+account's daily quota (10,000 requests per user per day, per the AI Developer
+Edition docs section 3.2) was exhausted later the same afternoon while running
+the security test suite against the live service, after which /v1/protect
+returns 403 and the SDK passes values through unprotected. Stage 1 (local Data
+Discovery containers) is unaffected and still runs live.
+
+------------------------------------------------------------------------
+STAGE 2  Reversible tokenize / detokenize  (hosted Protection API)
+------------------------------------------------------------------------
+ORIGINAL : Customer Jane Smith, SSN 123-45-6789, reachable at jane.smith@example.com, called about a refund.
+
+PROTECTED: Customer [PERSON]mG5v fWZRf[/PERSON], SSN [SOCIAL_SECURITY_ID]616-16-2210[/SOCIAL_SECURITY_ID], reachable at [EMAIL_ADDRESS]ASdT.Q6znF@example.com[/EMAIL_ADDRESS], called about a refund.
+           ^ real Protegrity DE tokens. This is what the vector store and the LLM see.
+
+REVEALED : Customer Jane Smith, SSN 123-45-6789, reachable at jane.smith@example.com, called about a refund.
+           ^ only for an authorized caller.
+
+Protegrity Developer Edition protected the name, SSN, and email end to end.
+------------------------------------------------------------------------
+
+What this shows
+---------------
+The protection is FORMAT PRESERVING and REVERSIBLE, which is the property AEGIS
+is built on and the reason masking is not a substitute:
+
+  123-45-6789            -> 616-16-2210              still a valid SSN shape
+  jane.smith@example.com -> ASdT.Q6znF@example.com   still a valid address shape
+  Jane Smith             -> mG5v fWZRf               still a plausible name
+
+Every downstream consumer that validates format keeps working. Nothing
+downstream ever receives a real person. And find_and_unprotect returns the exact
+original for a caller entitled to it, which masking can never do.
+
+Reproducing this
+----------------
+    cp .env.example .env          # add DEV_EDITION_EMAIL / _PASSWORD / _API_KEY
+    cd data-discovery && docker compose up -d
+    python protegrity_showcase.py
+
+Stage 2 is skipped with a printed explanation when credentials are absent, and
+protegrity_showcase.py asserts `protected != SAMPLE`, so a quota-exhausted or
+unauthenticated run fails loudly here rather than silently reporting success.
+That assertion is what caught the 403 in the first place.

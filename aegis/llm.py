@@ -38,17 +38,25 @@ class OpenAILLM:  # pragma: no cover - requires key + package
 class AnthropicLLM:  # pragma: no cover - requires key + package
     name = "anthropic"
 
-    def __init__(self, model: str = "claude-sonnet-5"):
+    def __init__(self, model: str = "claude-sonnet-5", system: str = ""):
         import anthropic
 
         self.client = anthropic.Anthropic()
         self.model = model
+        # Without a role, a bare prompt containing an obvious injection just gets
+        # refused, which measures the model's alignment rather than the pipeline.
+        # A real support assistant is deployed WITH a role that legitimately lets
+        # it surface a customer's details to the agent handling that customer.
+        self.system = system
 
     def complete(self, prompt: str) -> str:
-        r = self.client.messages.create(
-            model=self.model, max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        kwargs = {
+            "model": self.model, "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if self.system:
+            kwargs["system"] = self.system
+        r = self.client.messages.create(**kwargs)
         return "".join(b.text for b in r.content if getattr(b, "type", "") == "text")
 
 

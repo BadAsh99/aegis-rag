@@ -15,6 +15,15 @@ source .venv/bin/activate 2>/dev/null || true
 # shellcheck disable=SC1091
 if [ -f .env ]; then set -a; . ./.env; set +a; fi
 
+# Quiet the sentence-transformers / HF Hub chatter. Progress bars and the
+# unauthenticated-Hub warning print on every model load and read as errors in a
+# recorded walkthrough.
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+export HF_HUB_DISABLE_TELEMETRY=1
+export TRANSFORMERS_VERBOSITY=error
+export TOKENIZERS_PARALLELISM=false
+export PYTHONWARNINGS=ignore
+
 PAUSE="${DEMO_PAUSE:-1}"
 CY='\033[1;36m'; DIM='\033[2m'; RST='\033[0m'
 banner(){ printf "\n${CY}========================================================================\n%s\n========================================================================${RST}\n\n" "$1"; }
