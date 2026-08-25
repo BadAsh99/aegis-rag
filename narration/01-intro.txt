@@ -1,0 +1,5 @@
+Hi, I'm Ash Clements. This is AEGIS, my entry for the Protegrity AI Pipeline Security Challenge.
+
+Everyone building AI security right now is trying to harden the prompt, to catch the malicious instruction before the model acts on it. I took the opposite bet. I assumed the prompt injection wins, because the people who study this for a living have basically admitted it can not be reliably stopped at the input. So AEGIS does not defend the prompt. It gates the data. The whole idea is that when the injection succeeds, and it will, the attacker walks away with tokens, not people.
+
+Let me show you, and then I'll show you the same thing running on real Protegrity Developer Edition.

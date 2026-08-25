@@ -15,3 +15,8 @@ CONTENT_PHASE7.md
 
 # raw screen-recording takes, hundreds of MB, never commit
 recordings/
+
+# TTS source text is fine to commit; generated audio is not
+narration/*.mp3
+narration/*.wav
+narration/*.m4a

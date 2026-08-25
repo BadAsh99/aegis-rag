@@ -1,0 +1,3 @@
+The token gate is not just protection, it is a sensor. I seed the store with canary records that no real query should ever touch. The moment someone tries to cash a canary token, the tripwire fires, with the caller's identity, scope, and purpose attached. You are watching an exfiltration attempt in real time, and the decoy value itself never leaks because it is out of scope.
+
+And every real reveal is a hash-chained receipt. That is a tamper-evident audit trail. Watch, I edit one entry, and the chain verification flips to false. So every exposure of a real human value is logged, attributed, and provable. That is your G D P R Article 30 record of processing, for free.

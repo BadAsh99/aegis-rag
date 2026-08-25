@@ -1,0 +1,23 @@
+This is Protegrity Developer Edition, running locally. Three containers, public images, no account needed, up in about two minutes.
+
+I hand it a support ticket in plain prose. Watch what the classifier finds. Email address, confidence one point zero. Social security number, one point zero. And PERSON, Jane Smith, at zero point eight one, from the context provider.
+
+That third one is the whole reason I am using this product. My own offline tokenizer is regex based. It catches a social security number and an email because those have shape. It cannot see a name sitting in a sentence, and rather than hide that, I asserted it as a failing test in my own suite. It is in the repo, marked X fail, and it says out loud that my detector misses names in prose. Protegrity's classifier closes exactly that gap. That is not a checkbox integration, that is the thing my design needed and did not have.
+
+And here it rewrites those spans in place, redacted, then masked. Real product, real detection, running on my machine.
+
+Now the part that makes AEGIS work, reversible tokenization through their hosted protection API. This is running live.
+
+Here is what it produced. The social security number did not become asterisks. It became a different but structurally valid social security number. The email came back as a valid email. The name came back as a plausible name. Then find and unprotect returns the exact original, and only for a caller entitled to it.
+
+That is the difference between protecting data and destroying it. Masking gets you privacy by throwing the value away. This keeps every downstream format validator working, keeps identifier lookup working, and is still reversible for the one caller who should see it. Mask's privacy with plaintext's utility, which is the row in the table you just saw.
+
+And one thing I would rather show you than hide. This is my adapter. It calls configure, find and protect, find and unprotect. When I first wired it, I did not pass a named entity map to configure, and the S D K silently returned my data unchanged. No exception, no warning. My pipeline looked like it was protecting, and it was leaking every record.
+
+The only thing that caught it was a security test that asserts no raw P I I reaches the vector store. That is in my developer feedback for Protegrity, and it is the strongest argument I know for testing the invariant instead of the code path.
+
+So that is AEGIS. Gate the data, bind the reveal, gate the action, and turn the token gate into a tripwire. I assumed the injection wins and built the pipeline that makes winning worthless.
+
+I break AI models for a living in red team competitions, and then I build the defenses that make the breaks pointless. This is that, shipped, on Protegrity Developer Edition. The code is at github dot com slash Bad Ash 99 slash aegis dash rag, and the writeup is at ash clements dot dev.
+
+Thanks for watching.

@@ -1,0 +1,5 @@
+A mock that echoes its context proves nothing, so here is the same injection through a real Claude, deployed the way a real support assistant is deployed, with a role that legitimately lets it show an agent a customer's details.
+
+On the naive pipeline, the real model reads the poisoned document and leaks real customer contact details. On AEGIS, the same model, the same injection, and the output is a token.
+
+And I sample that baseline several times, because the model sometimes refuses on its own. When it refuses, that is the model's alignment holding, not the pipeline. That is exactly the thing I refuse to depend on. AEGIS's guarantee sits upstream of whether the model complies. Jailbreak it or not, it can not exfiltrate data it never received.

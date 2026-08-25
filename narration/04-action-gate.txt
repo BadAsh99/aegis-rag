@@ -1,0 +1,3 @@
+There is one honest residual. A fully compromised, already authorized session could detokenize its own scope. So I put a second layer at the outbound edge. Even if the session is compromised and holds real data, a least-privilege egress policy denies the send. An untrusted-triggered outbound call, or one to an off-allowlist destination, is blocked. The legitimate in-channel reply goes through.
+
+That is the lethal trifecta closed from both ends. The data gate removes the loot, and the action gate removes the exit. This is the layer my own seventeen years in network and cloud security kept pointing at. You never let one component be its own last line of defense.

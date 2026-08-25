@@ -1,0 +1,7 @@
+This is one indirect prompt injection, a poisoned document that tells the model to dump every customer's name, email, phone, and social security number. I run it against four different callers, and the injection succeeds every single time. The model always emits the context.
+
+Watch what each caller actually gets. On a plaintext pipeline, the attacker gets three real customers.
+
+Now the part most designs get wrong. A naive tokenized pipeline that only checks your role also leaks all three, because in a real support tool the agent is authorized, so it detokenizes everything. That is the EchoLeak trap.
+
+AEGIS binds the reveal to scope, not just role. The injected agent only opened one ticket, so it can only unlock that one customer's data. Blast radius goes from three to one. Same injection, same model getting fooled, but the data gate holds.

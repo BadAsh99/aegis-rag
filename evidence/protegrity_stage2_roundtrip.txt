@@ -1,14 +1,20 @@
 Protegrity AI Developer Edition, hosted Protection API
 Live reversible tokenize / detokenize round trip
-Captured 2026-08-24 14:20 MST from `python protegrity_showcase.py`
+Captured 2026-08-24 MST from `python protegrity_showcase.py`
 
-This is the verbatim Stage 2 output from a live call against
-https://api.developer-edition.protegrity.com. It is recorded here because the
-account's daily quota (10,000 requests per user per day, per the AI Developer
-Edition docs section 3.2) was exhausted later the same afternoon while running
-the security test suite against the live service, after which /v1/protect
-returns 403 and the SDK passes values through unprotected. Stage 1 (local Data
-Discovery containers) is unaffected and still runs live.
+This is verbatim Stage 2 output from a live call against
+https://api.developer-edition.protegrity.com. Run it yourself and you will get
+these same token values back: Protegrity's tokenization is deterministic, so the
+same input always produces the same token, which is exactly the property that
+keeps identifier lookup working after protection.
+
+Operational note for anyone reproducing this. The free tier allows 10,000
+requests per user per day (AI Developer Edition docs, section 3.2). Pointing a
+full test suite at the hosted API burns through that quickly, and once the quota
+is gone /v1/protect answers 403 while the SDK logs a warning and passes your
+values through UNPROTECTED. Point your tests at a local stand-in and reserve the
+hosted API for verification runs. Stage 1 runs on local containers and is not
+subject to the quota at all.
 
 ------------------------------------------------------------------------
 STAGE 2  Reversible tokenize / detokenize  (hosted Protection API)

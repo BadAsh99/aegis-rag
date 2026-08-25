@@ -1,0 +1,7 @@
+I do not want you to take my word for any of this, so I measured it, on real semantic embeddings, against a fair baseline. Three strategies, one table.
+
+Look at the re-identification column. On real embeddings, plaintext records link straight back to a person a hundred percent of the time. AEGIS, zero. Masking also gets you to zero leakage, but it destroys utility, identifier lookup dies and the value is gone forever. AEGIS keeps identical topic and identifier retrieval, with zero leakage, and the authorized caller still resolves.
+
+Mask's privacy, with plaintext's utility. That is the frontier win, and almost nobody publishes privacy, utility, and attack resistance together like this.
+
+And I left my own honesty in the repo. There is a test that fails on purpose, proving where the offline detector misses names in prose. I measure the gap instead of hiding it. Real Protegrity closes it, which is exactly what you are about to see.
