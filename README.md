@@ -6,8 +6,13 @@
 > tokenized on ingest and stays tokenized through embed / vector-store / LLM.
 > Detokenization is **scope-bound** (you only unlock the case you opened),
 > **audited** (every reveal is a hash-chained receipt), and **trip-wired** (a reveal
-> against a canary is an exfil alert). A second **action-gate** denies the exfil
-> even if a session is fully compromised.
+> against a canary is an exfil alert). A second **action-gate**, wired into the
+> pipeline, checks every outbound action against an allowlist, the turn's derived
+> taint, and the caller's scope, so a compromised session can't send other
+> customers' detector-visible PII out (reformatted PII the detector misses is a
+> stated limit).
+>
+> All data in this repo is **synthetic** (`example.com`, `555-01xx`).
 >
 > 2026 Protegrity AI Pipeline Security Hackathon · track: *Architect AI Without Exposure* · handle: **BadAsh99**
 
@@ -24,7 +29,7 @@
 
 ## The threat this defends against
 
-- **EchoLeak (CVE-2025-32711)**, first zero-click exfil from M365 Copilot (CVSS 9.3). Injection arrives in retrieved content; the model exfiltrates. Copilot *was* the authorized principal, which is exactly the case a naive tokenizer misses.
+- **EchoLeak (CVE-2025-32711)**, zero-click exfil from M365 Copilot via a single crafted email (CVSS 9.3 per Microsoft; NVD scores it 7.5). Injection arrives in retrieved content; the model exfiltrates using access it already holds on the user's behalf, which is exactly the case a naive tokenizer misses. Fixed server-side by Microsoft before disclosure; no known in-the-wild exploitation.
 - **OWASP LLM08:2025, Vector & Embedding Weaknesses**, embedding inversion + store leakage. The category this design targets head-on.
 - **OWASP LLM01 (Prompt Injection) / LLM02 (Sensitive Info Disclosure).**
 
@@ -36,8 +41,8 @@ The credible field has conceded the input layer (Willison's *lethal trifecta*, D
 |---|---|---|---|
 | **Data-gate** | tokenize PII before embed/store/LLM | store theft, embedding inversion, prompt/log capture | `attack_demo.py` |
 | **Scope-bound reveal** | detokenize only the case the caller opened | injected *authorized* agent (the EchoLeak trap) | `attack_demo.py` |
-| **Tripwire + ledger** | canary reveal = alert; every reveal = signed receipt | exfil *detection* + GDPR Art.30 audit | `tripwire_demo.py` |
-| **Action-gate** | deny untrusted-triggered / off-allowlist egress | compromised authorized session (lethal-trifecta leg 3) | `action_gate_demo.py` |
+| **Tripwire + ledger** | canary reveal = alert; every reveal attempt (granted or denied) = HMAC-chained receipt | exfil *detection* + GDPR Art.30 audit | `tripwire_demo.py` |
+| **Action-gate** | allowlist + derived taint + payload-scope check on every proposed egress | compromised authorized session (lethal-trifecta leg 3) | `action_gate_demo.py` |
 
 The keystone is layer 2. Role-gating asks *"are you a support agent?"*, and an injected agent is. Scope-gating asks *"are you entitled to THIS person's data?"* So an injection that dumps everyone else's tokens yields tokens even for an authorized caller. That's the honest answer to EchoLeak.
 
@@ -50,15 +55,16 @@ python attack_demo.py        # blast radius: naive 3 / role-only 3 / scope-bound
 python tripwire_demo.py      # detok-as-IDS: canary alert + tamper-evident reveal ledger
 python action_gate_demo.py   # gate-the-action: exfil denied even after detokenization
 python benchmark.py          # the privacy/utility table (installs sentence-transformers for real semantics)
-pytest -q                    # 6 passed, 1 xfailed (an HONEST xfail, see below)
+pytest -q                    # 22 passed, 1 xfailed (an HONEST xfail, see below)
 ```
 
 And the one the offline mock can't fake, a **real model** under real injection:
 
 ```bash
-ANTHROPIC_API_KEY=… python real_llm_demo.py
-# NAIVE → real Claude emits a real customer email.  AEGIS → real Claude emits "Customer: tok:8c18…".
+ANTHROPIC_API_KEY=… python real_llm_demo.py [--role neutral]
+# NAIVE → real Claude emits raw (synthetic) contact details.  AEGIS → real Claude emits "tok:8c18…".
 # The guarantee is upstream of whether the model complies.
+# Captured runs, both system-prompt variants: evidence/real_llm_run_2026-10-07_*.txt
 ```
 
 ## The numbers (measured on real MiniLM embeddings, fair baseline), `python benchmark.py`
@@ -74,8 +80,12 @@ On real semantic embeddings, plaintext records re-identify to a person **100%** 
 ## What this is NOT (the honesty box)
 
 - **Not** a prompt-injection *preventer*. The injection still succeeds, AEGIS makes the loot worthless, contains the reveal, catches the attempt, and blocks the egress.
-- **Not** novel tokenization. The pattern is productized (Skyflow LLM Privacy Vault) and open-source (Presidio). What's original: **scope-bound reveal + the detok-as-IDS tripwire + the signed ledger + the action-gate + honest measurement**.
-- **Not** "never exposed." Free-text PII protection = **detector recall**: the offline mock uses regex and misses names in prose (`tests/…::test_no_freetext_names_leak` is an `xfail` that proves it). Real Protegrity `find_and_protect` runs PERSON NER and closes it. We measure the gap.
+- **Not** novel tokenization. The pattern is productized (Skyflow LLM Privacy Vault) and open-source (Presidio). What's original: **scope-bound reveal + the detok-as-IDS tripwire + the HMAC-chained ledger + the action-gate + honest measurement**.
+- **Not** "never exposed." Free-text PII protection = **detector recall**: the offline mock uses regex and misses names in prose (`tests/…::test_no_freetext_names_leak` is an `xfail` that proves it). Protegrity `find_and_protect` runs a PERSON classifier and tokenized a name in a live test (`evidence/protegrity_stage2_roundtrip.txt`), but the full suite is not yet green against live DE (below). We measure the gap.
+- **Not** production key management. The tokenization and ledger keys default to a dev key; set `AEGIS_LEDGER_KEY` (and keep it out of the repo) for anything real. The ledger is in-memory.
+- **Not** a complete egress policy. The action-gate's payload check sees what the PII detector sees: under the mock, reformatted PII (spaced or spelled-out emails, undashed SSNs, base64, split across actions) and names get through. The allowlist is exact-string. Break-glass admin skips the payload check by design.
+- **Not** fully tamper-proof audit. The HMAC chain detects edited or reordered ledger entries, not truncation of the tail.
+- **Not** multi-owner. Deterministic tokens carry one owner; a record that repeats another customer's value first becomes its owner.
 - **Not** solving RAG **integrity** (PoisonedRAG). That's a different, real threat, out of scope here, named so nobody thinks we missed it.
 - **Not** air-gapped. Protegrity's crypto is a hosted API call.
 
@@ -86,7 +96,7 @@ On real semantic embeddings, plaintext records re-identify to a person **100%** 
 
 ## The Protegrity swap (one class)
 
-Flip `AEGIS_PROTECTOR=protegrity`; only `aegis/protection.py`'s `ProtegrityProtector` changes. Free text → `find_and_protect` / `find_and_unprotect` (PERSON NER closes the name gap); structured → `appython` session protect/unprotect with data elements; scope-bound reveal maps onto Protegrity's RBAC policy engine. Written against the published API, ready to activate when Developer Edition access lands.
+Flip `AEGIS_PROTECTOR=protegrity`; only `aegis/protection.py`'s `ProtegrityProtector` changes. Free text and structured values both go through `find_and_protect` / `find_and_unprotect` (Developer Edition SDK v1.1.1). Live round-trip verified on 2026-08-24 (`evidence/`). **Status: 2 security tests still fail against live DE** (store + scope-bound reveal), because the classifier's typing of bare field values isn't stable yet, so `mock` stays the default. The tripwire and ledger are implemented in the mock backend only; in production, scope belongs in Protegrity's policy engine.
 
 ## Structure
 
@@ -97,7 +107,7 @@ aegis/
   action_gate.py  least-privilege egress policy (the gate-the-action layer)
   pii.py · ingest.py · vectorstore.py · llm.py · pipeline.py
 attack_demo.py    blast-radius money-shot (naive / role-only / scope-bound)
-tripwire_demo.py  detok-as-IDS + signed reveal ledger
+tripwire_demo.py  detok-as-IDS + HMAC-chained reveal ledger
 action_gate_demo.py  exfil denied even after detokenization
 real_llm_demo.py  real Claude under real injection (the mock can't prove this)
 benchmark.py      privacy/utility table on real embeddings

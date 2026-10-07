@@ -12,6 +12,10 @@ import json
 
 PII_FIELDS = {"name", "email", "ssn", "phone", "dob", "address"}
 
+#: fields a source record may never set for itself. Trust is assigned by the
+#: operator at ingest time (Aegis.ingest(..., trusted=True)), never by the data.
+RESERVED_FIELDS = {"trusted", "_trusted"}
+
 # map each field to its Protegrity data-element (ignored by the mock)
 FIELD_ELEMENT = {
     "name": "name", "email": "email", "ssn": "ssn",
@@ -23,6 +27,8 @@ def protect_record(rec: dict, protector) -> dict:
     owner = rec.get("id")  # every token from this record is stamped with its owner
     out: dict = {}
     for k, v in rec.items():
+        if k in RESERVED_FIELDS:
+            continue
         if k in PII_FIELDS and isinstance(v, str):
             out[k] = protector.protect(v, data_element=FIELD_ELEMENT.get(k, "text"), owner=owner)
         elif k == "body" and isinstance(v, str):

@@ -20,3 +20,6 @@ recordings/
 narration/*.mp3
 narration/*.wav
 narration/*.m4a
+
+narration/audio/
+narration/build/

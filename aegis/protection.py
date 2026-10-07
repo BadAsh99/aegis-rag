@@ -18,17 +18,24 @@ gating asks "are you entitled to THIS person's data?", the question that matters
 TWO THINGS COMPOSE ON THE SAME GATE:
   - honeytokens: canary records no legit query touches. A reveal attempt against
     a canary token = an exfil attempt caught in real time (detok-as-IDS).
-  - reveal ledger: every actual detokenization is a signed, hash-chained,
-    purpose-bound audit receipt (zero-standing-PII → GDPR Art.30 / EU AI Act).
+  - reveal ledger: every reveal attempt, granted or denied, is an HMAC-chained,
+    purpose-bound audit receipt (zero-standing-PII → GDPR Art.30). The chain
+    detects edited or reordered entries; it does NOT detect truncation of the
+    tail (no externally anchored head).
+    The chain key comes from AEGIS_LEDGER_KEY; the built-in default is a dev key,
+    so a production deployment must set it (and keep it out of the repo).
 
 HONESTY NOTE: the mock detects free-text PII with regexes only (no PERSON NER),
 so it MISSES names in prose, a real residual risk = detector recall, proved by
 tests/test_no_raw_leak.py (an xfail), not hidden. Protegrity find_and_protect()
-closes it with a real classifier. We measure this; we never claim "never."
+runs a PERSON classifier that caught a name in a live test (evidence/), but the
+full suite is not yet green against live DE (see ProtegrityProtector). We measure
+this; we never claim "never."
 """
 from __future__ import annotations
 import hashlib
 import hmac
+import os
 import re
 import time
 from abc import ABC, abstractmethod
@@ -63,6 +70,7 @@ class RevealEvent:
     scope: str
     ts: float
     prev_hash: str
+    outcome: str = "granted"   # granted | denied
     entry_hash: str = ""
 
 
@@ -101,6 +109,10 @@ class Protector(ABC):
         """Tokens present in `text`, for exact-identifier retrieval. Override."""
         return set()
 
+    def owner_of_value(self, value: str) -> str | None:
+        """Which record owns this raw value (for egress payload attribution). Override."""
+        return None
+
     def is_token(self, s: str) -> bool:
         return isinstance(s, str) and s.startswith(self.PREFIX)
 
@@ -113,12 +125,16 @@ class MockProtector(Protector):
     Implements scope-bound reveal + the honeytoken tripwire + the reveal ledger.
     """
 
-    def __init__(self, key: bytes = b"aegis-dev-mock-key"):
-        self._key = key
+    DEV_KEY = b"aegis-dev-mock-key"
+
+    def __init__(self, key: bytes | None = None, ledger_key: bytes | None = None):
+        self._key = key or self.DEV_KEY
+        env_ledger = os.getenv("AEGIS_LEDGER_KEY")
+        self._ledger_key = ledger_key or (env_ledger.encode() if env_ledger else self._key)
         self._vault: dict[str, tuple[str, str | None]] = {}  # token -> (raw, owner)
         self._canaries: set[str] = set()   # owner ids that are honeytokens
         self.alerts: list[Alert] = []      # tripwire hits (detok-as-IDS)
-        self.ledger: list[RevealEvent] = []  # signed, hash-chained reveal audit
+        self.ledger: list[RevealEvent] = []  # HMAC-chained reveal audit, granted + denied
 
     # ---- honeytokens -------------------------------------------------------
     def mark_canary(self, owner: str) -> None:
@@ -129,10 +145,24 @@ class MockProtector(Protector):
     def protect(self, value: str, data_element: str = "text", owner: str | None = None) -> str:
         if value is None:
             return value
-        digest = hmac.new(self._key, str(value).encode(), hashlib.sha256).hexdigest()[:20]
-        token = f"{self.PREFIX}{digest}"
-        self._vault[token] = (str(value), owner)  # deterministic: same value -> same token
+        token = self._token_for(value)
+        existing = self._vault.get(token)
+        # deterministic: same value -> same token. Never let a later, owner-less
+        # protect (e.g. tokenizing a user's query) erase the record that owns it.
+        # Known limit: one owner per token, first owned writer wins. A record that
+        # repeats someone else's value first becomes its owner (DoS/misattribution
+        # for the real owner, no new disclosure: the writer already had the value).
+        if existing is None or (owner is not None and existing[1] is None):
+            self._vault[token] = (str(value), owner)
         return token
+
+    def _token_for(self, value) -> str:
+        digest = hmac.new(self._key, str(value).encode(), hashlib.sha256).hexdigest()[:20]
+        return f"{self.PREFIX}{digest}"
+
+    def owner_of_value(self, value: str) -> str | None:
+        hit = self._vault.get(self._token_for(value))
+        return hit[1] if hit else None
 
     def protect_freetext(self, text: str, owner: str | None = None) -> str:
         from .pii import tokenize_text  # regex-based; misses names (honest gap)
@@ -152,6 +182,7 @@ class MockProtector(Protector):
                                          in_scope=allowed, ts=time.time()))
 
             if not allowed or raw_owner is None:
+                self._log_reveal(token, owner, purpose, scope, outcome="denied")
                 return token  # out of scope (or unknown) -> stays a token
             self._log_reveal(token, owner, purpose, scope)
             return raw_owner[0]
@@ -161,23 +192,35 @@ class MockProtector(Protector):
     def unprotect(self, token: str, *, authorized: bool, data_element: str = "text") -> str:
         if not self.is_token(token):
             return token
+        owner = self._vault.get(token, (None, None))[1]
         if not authorized:
+            self._log_reveal(token, owner, "unprotect", None, outcome="denied")
             raise ProtectionError("unprotect denied: caller not authorized by policy")
         if token not in self._vault:
+            self._log_reveal(token, None, "unprotect", None, outcome="denied")
             raise ProtectionError(f"unknown token {token!r}")
+        self._log_reveal(token, owner, "unprotect", ALL)
         return self._vault[token][0]
 
     def tokens_in(self, text: str) -> set[str]:
         return set(MOCK_TOKEN_RE.findall(text))
 
-    # ---- signed reveal ledger (token-as-capability audit receipt) ----------
-    def _log_reveal(self, token, owner, purpose, scope):
+    # ---- HMAC-chained reveal ledger (token-as-capability audit receipt) -----
+    @staticmethod
+    def _ledger_payload(ev) -> str:
+        return f"{ev.prev_hash}|{ev.token}|{ev.owner}|{ev.purpose}|{ev.scope}|{ev.ts}|{ev.outcome}"
+
+    def _log_reveal(self, token, owner, purpose, scope, outcome="granted"):
         prev = self.ledger[-1].entry_hash if self.ledger else "genesis"
         ev = RevealEvent(token, owner, self._data_element_of(token), purpose,
-                         _scope_str(scope), time.time(), prev)
-        payload = f"{ev.prev_hash}|{ev.token}|{ev.owner}|{ev.purpose}|{ev.scope}|{ev.ts}"
-        ev.entry_hash = hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest()
+                         _scope_str(scope), time.time(), prev, outcome)
+        ev.entry_hash = hmac.new(self._ledger_key, self._ledger_payload(ev).encode(),
+                                 hashlib.sha256).hexdigest()
         self.ledger.append(ev)
+
+    @property
+    def granted_reveals(self) -> list[RevealEvent]:
+        return [ev for ev in self.ledger if ev.outcome == "granted"]
 
     def _data_element_of(self, token: str) -> str:  # mock doesn't track element per token
         return "text"
@@ -188,8 +231,9 @@ class MockProtector(Protector):
         for ev in self.ledger:
             if ev.prev_hash != prev:
                 return False
-            payload = f"{ev.prev_hash}|{ev.token}|{ev.owner}|{ev.purpose}|{ev.scope}|{ev.ts}"
-            if hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest() != ev.entry_hash:
+            expected = hmac.new(self._ledger_key, self._ledger_payload(ev).encode(),
+                                hashlib.sha256).hexdigest()
+            if expected != ev.entry_hash:
                 return False
             prev = ev.entry_hash
         return True
